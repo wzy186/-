@@ -44,5 +44,6 @@ This project implements the Transformer architecture as described in "Attention 
 
 1. **Clone the repository**:
 ```bash
-git clone https://github.com/your-username/transformer-from-scratch.git
+git clone (https://github.com/wzy186/-/tree/main/transformer)
+
 cd transformer-from-scratch
