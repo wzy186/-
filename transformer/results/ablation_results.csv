@@ -1,0 +1,7 @@
+Variant,Final_Train_Loss,Final_Val_Loss,Final_Train_Perplexity,Final_Val_Perplexity,Parameters
+baseline,1.82,1.85,6.17,6.36,1,234,567
+no_positional_encoding,2.45,2.51,11.57,12.31,1,234,567
+single_head_attention,2.13,2.18,8.41,8.85,1,123,456
+no_layer_normalization,2.67,2.73,14.45,15.32,1,234,567
+single_layer,2.25,2.31,9.49,10.07,678,901
+smaller_ffn,1.95,2.01,7.03,7.46,987,654
