@@ -1,0 +1,23 @@
+# 风险等级判断 Prompt
+
+请根据以下对话内容，判断该学生的心理风险等级和情绪标签。
+
+## 输出格式（严格 JSON）
+```json
+{
+  "riskLevel": "LOW | MEDIUM | HIGH | CRITICAL",
+  "emotionLabel": "NORMAL | ANXIOUS | DEPRESSED | ANGRY | FEARFUL | HOPELESS | SUICIDAL",
+  "summary": "一句话总结对话内容和风险判断理由",
+  "needAlert": true/false,
+  "needCounselor": true/false
+}
+```
+
+## 风险等级定义
+- LOW: 正常情绪波动，无风险信号
+- MEDIUM: 存在焦虑、失眠等轻度症状，需关注
+- HIGH: 严重抑郁、恐慌发作等，需及时干预
+- CRITICAL: 自杀倾向、自残意图，需立即干预
+
+## 对话内容
+{conversation}

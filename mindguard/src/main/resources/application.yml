@@ -1,0 +1,77 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: mindguard
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/mindguard?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:sk-xxx}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      chat:
+        options:
+          model: gpt-4o
+          temperature: 0.7
+      embedding:
+        enabled: false
+
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        options:
+          model: qwen2.5:7b
+          temperature: 0.6
+      embedding:
+        options:
+          model: qwen2.5:7b
+
+    chroma:
+      client:
+        host: localhost
+        port: 8000
+
+  mail:
+    host: smtp.example.com
+    port: 587
+    username: ${MAIL_USERNAME:mindguard@example.com}
+    password: ${MAIL_PASSWORD:xxx}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+jwt:
+  secret: ${JWT_SECRET:mySecretKeyForMindGuardAI2026VeryLongSecretForSecurity}
+  expiration: 86400000
+
+mindguard:
+  model:
+    strategy: ollama
+  memory:
+    short-term:
+      max-messages: 20
+    long-term:
+      top-k: 5
+      chunk-size: 300
+      chunk-overlap: 50
+  risk:
+    high-risk-email-enabled: true
+    high-risk-email-to: counselor@university.edu,health-center@university.edu
+  excel:
+    path: ./data/psychological_records.xlsx
+  knowledge:
+    base-dir: ./knowledge/

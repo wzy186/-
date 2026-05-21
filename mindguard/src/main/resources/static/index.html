@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MindGuard AI</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-primary: #1a1a2e; --bg-secondary: #16213e; --bg-tertiary: #0f3460;
+            --bg-chat: #1a1a2e; --bg-sidebar: #0d1117; --bg-input: #21262d;
+            --bg-user-msg: #3b82f6; --bg-ai-msg: #21262d; --bg-hover: #1c2333;
+            --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+            --accent: #58a6ff; --accent-hover: #79b8ff; --border: #30363d;
+            --danger: #f85149; --success: #3fb950; --warning: #d29922;
+        }
+        body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-primary); color: var(--text-primary); height: 100vh; overflow: hidden; }
+
+        /* ===== Layout ===== */
+        .app { display: flex; height: 100vh; }
+
+        /* ===== Sidebar ===== */
+        .sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+        .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+        .sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .sidebar-logo .logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .sidebar-logo span { font-weight: 700; font-size: 16px; background: linear-gradient(135deg, #58a6ff, #bc8cff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .new-chat-btn { width: 100%; padding: 10px; background: transparent; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-secondary); cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 8px; justify-content: center; transition: all .2s; }
+        .new-chat-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,0.05); }
+        .sidebar-section { padding: 12px 8px; flex: 1; overflow-y: auto; }
+        .sidebar-section-title { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 12px; margin-bottom: 4px; }
+        .chat-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; transition: all .15s; position: relative; }
+        .chat-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .chat-item.active { background: var(--bg-tertiary); color: var(--text-primary); }
+        .chat-item .delete-btn { display: none; position: absolute; right: 8px; background: none; border: none; color: var(--danger); cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+        .chat-item:hover .delete-btn { display: block; }
+        .chat-item .chat-icon { opacity: 0.5; font-size: 14px; }
+
+        /* Sidebar Footer */
+        .sidebar-footer { border-top: 1px solid var(--border); padding: 8px; }
+        .sidebar-footer-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 10px; transition: all .15s; }
+        .sidebar-footer-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .sidebar-footer-item.active { background: var(--bg-tertiary); color: var(--accent); }
+        .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #fff; flex-shrink: 0; }
+
+        /* ===== Main Content ===== */
+        .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+
+        /* Top Bar */
+        .topbar { height: 52px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 20px; gap: 12px; background: var(--bg-primary); }
+        .topbar-title { font-weight: 600; font-size: 15px; flex: 1; }
+        .topbar-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+        .badge-risk-low { background: rgba(63,185,80,0.15); color: var(--success); }
+        .badge-risk-medium { background: rgba(210,153,34,0.15); color: var(--warning); }
+        .badge-risk-high { background: rgba(248,81,73,0.15); color: var(--danger); }
+        .topbar-status { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+
+        /* ===== Chat Area ===== */
+        #chatView { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .chat-area { flex: 1; overflow-y: auto; min-height: 0; }
+        .chat-area::-webkit-scrollbar { width: 6px; }
+        .chat-area::-webkit-scrollbar-track { background: transparent; }
+        .chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .chat-messages { max-width: 768px; margin: 0 auto; padding: 24px 20px 24px; }
+
+        .msg { margin-bottom: 24px; display: flex; gap: 12px; animation: fadeIn .3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .msg.user { flex-direction: row-reverse; }
+        .msg-avatar { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+        .msg.user .msg-avatar { background: var(--bg-user-msg); }
+        .msg.assistant .msg-avatar { background: linear-gradient(135deg, #3b82f6, #8b5cf6); }
+        .msg-content { max-width: 70%; min-width: 60px; }
+        .msg.user .msg-content { text-align: right; }
+        .msg-bubble { padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.7; word-break: break-word; }
+        .msg.user .msg-bubble { background: var(--bg-user-msg); color: #fff; border-bottom-right-radius: 4px; }
+        .msg.assistant .msg-bubble { background: var(--bg-ai-msg); color: var(--text-primary); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
+        .msg-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; padding: 0 4px; }
+
+        /* Typing indicator */
+        .typing-indicator { display: flex; gap: 4px; padding: 12px 16px; }
+        .typing-indicator span { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.4s infinite; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-8px); } }
+
+        /* ===== Input Area ===== */
+        .input-area { flex-shrink: 0; border-top: 1px solid var(--border); padding: 16px 20px; background: var(--bg-primary); }
+        .input-wrapper { max-width: 768px; margin: 0 auto; position: relative; }
+        .input-box { width: 100%; padding: 14px 52px 14px 18px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 14px; color: var(--text-primary); font-size: 14px; font-family: inherit; outline: none; resize: none; min-height: 48px; max-height: 120px; transition: border-color .2s; }
+        .input-box:focus { border-color: var(--accent); }
+        .input-box::placeholder { color: var(--text-muted); }
+        .send-btn { position: absolute; right: 8px; bottom: 8px; width: 36px; height: 36px; border-radius: 10px; background: var(--accent); border: none; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; }
+        .send-btn:hover { background: var(--accent-hover); }
+        .send-btn:disabled { background: var(--border); cursor: not-allowed; }
+        .send-btn svg { width: 18px; height: 18px; }
+
+        /* ===== Welcome Screen ===== */
+        .welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; gap: 16px; }
+        .welcome-icon { width: 64px; height: 64px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+        .welcome h2 { font-size: 22px; font-weight: 600; }
+        .welcome p { color: var(--text-secondary); font-size: 14px; text-align: center; max-width: 360px; line-height: 1.6; }
+        .welcome-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; justify-content: center; }
+        .suggestion { padding: 8px 16px; background: var(--bg-ai-msg); border: 1px solid var(--border); border-radius: 20px; font-size: 13px; color: var(--text-secondary); cursor: pointer; transition: all .2s; }
+        .suggestion:hover { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,0.05); }
+
+        /* ===== Auth Modal ===== */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-overlay.show { display: flex; }
+        .modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 380px; animation: modalIn .25s ease; }
+        @keyframes modalIn { from { opacity: 0; transform: scale(0.95); } }
+        .modal h2 { font-size: 20px; margin-bottom: 8px; text-align: center; }
+        .modal p { font-size: 13px; color: var(--text-secondary); text-align: center; margin-bottom: 24px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; display: block; }
+        .form-input { width: 100%; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; color: var(--text-primary); font-size: 14px; outline: none; font-family: inherit; transition: border-color .2s; }
+        .form-input:focus { border-color: var(--accent); }
+        .form-btn { width: 100%; padding: 12px; background: var(--accent); border: none; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .2s; margin-top: 8px; }
+        .form-btn:hover { background: var(--accent-hover); }
+        .form-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-secondary); }
+        .form-switch a { color: var(--accent); cursor: pointer; text-decoration: none; }
+        .form-switch a:hover { text-decoration: underline; }
+        .form-error { color: var(--danger); font-size: 12px; margin-top: 6px; display: none; }
+
+        /* ===== Records Panel ===== */
+        .records-panel { display: none; flex: 1; overflow-y: auto; padding: 24px; }
+        .records-panel.show { display: block; }
+        .records-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .records-header h2 { font-size: 18px; }
+        .record-card { background: var(--bg-ai-msg); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; transition: border-color .2s; }
+        .record-card:hover { border-color: var(--accent); }
+        .record-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .record-time { font-size: 12px; color: var(--text-muted); }
+        .record-tags { display: flex; gap: 6px; }
+        .record-tag { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+        .record-summary { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .sidebar { width: 0; overflow: hidden; position: fixed; z-index: 50; height: 100vh; }
+            .sidebar.open { width: 260px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app">
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <div class="logo-icon">M</div>
+                <span>MindGuard AI</span>
+            </div>
+            <button class="new-chat-btn" onclick="newChat()">+ 新对话</button>
+        </div>
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">对话历史</div>
+            <div id="chatList"></div>
+        </div>
+        <div class="sidebar-footer">
+            <div class="sidebar-footer-item" id="navChat" onclick="showChat()">
+                <span>💬</span> 对话
+            </div>
+            <div class="sidebar-footer-item" id="navRecords" onclick="showRecords()">
+                <span>📋</span> 记录
+            </div>
+            <div class="sidebar-footer-item" id="navUser" onclick="showAuth()">
+                <div class="user-avatar" id="userAvatarSidebar">?</div>
+                <span id="userDisplayName">未登录</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main -->
+    <div class="main">
+        <!-- Top Bar -->
+        <div class="topbar">
+            <button style="background:none;border:none;color:var(--text-secondary);font-size:20px;cursor:pointer;display:none;" id="menuBtn" onclick="toggleSidebar()">☰</button>
+            <div class="topbar-title" id="topbarTitle">MindGuard AI</div>
+            <div id="topbarBadge"></div>
+            <div class="topbar-status" id="connStatus" title="连接状态"></div>
+        </div>
+
+        <!-- Chat View -->
+        <div id="chatView">
+            <div class="chat-area" id="chatArea">
+                <div class="welcome" id="welcomeScreen">
+                    <div class="welcome-icon">M</div>
+                    <h2>MindGuard AI</h2>
+                    <p>你的心理健康监护助手，随时倾听，专业支持</p>
+                    <div class="welcome-suggestions">
+                        <div class="suggestion" onclick="quickSend('我最近总是焦虑')">我最近总是焦虑</div>
+                        <div class="suggestion" onclick="quickSend('考试压力很大，失眠')">考试压力大失眠</div>
+                        <div class="suggestion" onclick="quickSend('和朋友吵架了很难过')">和朋友吵架了</div>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chatMessages" style="display:none;"></div>
+            </div>
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea class="input-box" id="msgInput" placeholder="输入消息..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+                    <button class="send-btn" id="sendBtn" onclick="send()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Records View -->
+        <div class="records-panel" id="recordsPanel">
+            <div class="records-header">
+                <h2>心理监护记录</h2>
+            </div>
+            <div id="recordsList">
+                <p style="color:var(--text-muted);font-size:13px;">暂无记录，开始对话后将自动生成。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auth Modal -->
+<div class="modal-overlay" id="authModal">
+    <div class="modal">
+        <h2 id="authTitle">登录</h2>
+        <p id="authDesc">登录以开始对话</p>
+        <div class="form-group">
+            <label>用户名</label>
+            <input class="form-input" id="authUsername" placeholder="请输入用户名" />
+        </div>
+        <div class="form-group">
+            <label>密码</label>
+            <input class="form-input" id="authPassword" type="password" placeholder="请输入密码" />
+        </div>
+        <div class="form-error" id="authError"></div>
+        <button class="form-btn" id="authSubmitBtn" onclick="submitAuth()">登录</button>
+        <div class="form-switch">
+            <span id="authSwitch">还没有账号？<a onclick="toggleAuthMode()">注册</a></span>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = 'http://localhost:8088';
+let token = localStorage.getItem('mg_token') || '';
+let username = localStorage.getItem('mg_user') || '';
+let authMode = 'login';
+let currentChatId = null;
+let isSending = false;
+
+// User-scoped storage keys
+function chatKey() { return 'mg_chats_' + username; }
+function loadChats() { return JSON.parse(localStorage.getItem(chatKey()) || '{}'); }
+function saveChats(data) { localStorage.setItem(chatKey(), JSON.stringify(data)); }
+function chats() { return loadChats(); }
+
+// ===== Init =====
+window.onload = () => {
+    if (token && username) { onLoggedIn(); loadUserChats(); }
+    else { showAuthModal(); }
+    document.getElementById('msgInput').focus();
+};
+
+function loadUserChats() {
+    renderChatList();
+}
+
+// ===== Auth =====
+function showAuthModal() { document.getElementById('authModal').classList.add('show'); }
+function hideAuthModal() { document.getElementById('authModal').classList.remove('show'); }
+function toggleAuthMode() {
+    authMode = authMode === 'login' ? 'register' : 'login';
+    document.getElementById('authTitle').textContent = authMode === 'login' ? '登录' : '注册';
+    document.getElementById('authDesc').textContent = authMode === 'login' ? '登录以开始对话' : '创建账号开始使用';
+    document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? '登录' : '注册';
+    document.getElementById('authSwitch').innerHTML = authMode === 'login'
+        ? '还没有账号？<a onclick="toggleAuthMode()">注册</a>'
+        : '已有账号？<a onclick="toggleAuthMode()">登录</a>';
+    document.getElementById('authError').style.display = 'none';
+}
+async function submitAuth() {
+    const u = document.getElementById('authUsername').value.trim();
+    const p = document.getElementById('authPassword').value.trim();
+    if (!u || !p) { showAuthError('请填写用户名和密码'); return; }
+    const url = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const body = authMode === 'login'
+        ? { username: u, password: p }
+        : { username: u, password: p, role: 'USER', realName: u };
+    try {
+        const res = await fetch(API + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (data.token) {
+            token = data.token; username = u;
+            localStorage.setItem('mg_token', token);
+            localStorage.setItem('mg_user', username);
+            onLoggedIn();
+            hideAuthModal();
+            loadUserChats();
+        } else {
+            showAuthError(data.error || '操作失败');
+        }
+    } catch (e) { showAuthError('网络错误'); }
+}
+function showAuthError(msg) {
+    const el = document.getElementById('authError');
+    el.textContent = msg; el.style.display = 'block';
+}
+function onLoggedIn() {
+    document.getElementById('userDisplayName').textContent = username;
+    document.getElementById('userAvatarSidebar').textContent = username[0].toUpperCase();
+    document.getElementById('navUser').onclick = () => { if(confirm('确认退出？')) logout(); };
+}
+function logout() {
+    const oldUser = username;
+    token = ''; username = '';
+    localStorage.removeItem('mg_token');
+    localStorage.removeItem('mg_user');
+    document.getElementById('userDisplayName').textContent = '未登录';
+    document.getElementById('userAvatarSidebar').textContent = '?';
+    document.getElementById('navUser').onclick = () => showAuthModal();
+    currentChatId = null;
+    showAuthModal();
+}
+function showAuth() { showAuthModal(); }
+
+// ===== Chat List =====
+function renderChatList() {
+    const data = loadChats();
+    const list = document.getElementById('chatList');
+    const keys = Object.keys(data).sort((a, b) => data[b].ts - data[a].ts);
+    list.innerHTML = keys.map(id => `
+        <div class="chat-item ${id === currentChatId ? 'active' : ''}" onclick="switchChat('${id}')">
+            <span class="chat-icon">💬</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${data[id].title || '新对话'}</span>
+            <button class="delete-btn" onclick="event.stopPropagation();deleteChat('${id}')">×</button>
+        </div>
+    `).join('');
+}
+function newChat() {
+    const id = 'chat_' + Date.now();
+    const data = loadChats();
+    data[id] = { title: '', messages: [], ts: Date.now() };
+    saveChats(data);
+    switchChat(id);
+    renderChatList();
+}
+function switchChat(id) {
+    currentChatId = id;
+    renderChatList();
+    renderMessages();
+    const data = loadChats();
+    document.getElementById('topbarTitle').textContent = data[id]?.title || '新对话';
+}
+function deleteChat(id) {
+    const data = loadChats();
+    delete data[id];
+    if (currentChatId === id) {
+        const keys = Object.keys(data);
+        currentChatId = keys.length > 0 ? keys[keys.length - 1] : null;
+    }
+    saveChats(data);
+    renderChatList();
+    renderMessages();
+}
+
+// ===== Messages =====
+function renderMessages() {
+    const data = loadChats();
+    const msgs = currentChatId && data[currentChatId] ? data[currentChatId].messages : [];
+    const welcomeEl = document.getElementById('welcomeScreen');
+    const chatEl = document.getElementById('chatMessages');
+    if (msgs.length === 0) {
+        welcomeEl.style.display = 'flex';
+        chatEl.style.display = 'none';
+    } else {
+        welcomeEl.style.display = 'none';
+        chatEl.style.display = 'block';
+        chatEl.innerHTML = msgs.map(m => `
+            <div class="msg ${m.role}">
+                <div class="msg-avatar">${m.role === 'user' ? '👤' : 'M'}</div>
+                <div class="msg-content">
+                    <div class="msg-bubble">${escapeHtml(m.text)}</div>
+                    <div class="msg-meta">${m.time}</div>
+                </div>
+            </div>
+        `).join('');
+        document.getElementById('chatArea').scrollTop = 99999;
+    }
+}
+function addMessage(role, text) {
+    if (!currentChatId) newChat();
+    const data = loadChats();
+    const chat = data[currentChatId];
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+    chat.messages.push({ role, text, time });
+    if (!chat.title && role === 'user') chat.title = text.slice(0, 20) + (text.length > 20 ? '...' : '');
+    chat.ts = Date.now();
+    saveChats(data);
+    renderMessages();
+    renderChatList();
+    document.getElementById('topbarTitle').textContent = chat.title || '新对话';
+}
+
+// ===== Send =====
+async function send() {
+    if (isSending) return;
+    if (!token) { showAuthModal(); return; }
+    const input = document.getElementById('msgInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = ''; autoResize(input);
+    addMessage('user', text);
+
+    isSending = true;
+    document.getElementById('sendBtn').disabled = true;
+    const chatEl = document.getElementById('chatMessages');
+    chatEl.innerHTML += `<div class="msg assistant" id="typingMsg"><div class="msg-avatar">M</div><div class="msg-content"><div class="msg-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div></div></div>`;
+    document.getElementById('chatArea').scrollTop = 99999;
+
+    try {
+        const res = await fetch(API + '/api/chat/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ message: text })
+        });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        const typing = document.getElementById('typingMsg');
+        if (typing) typing.remove();
+        addMessage('assistant', data.reply || data.error || '无回复');
+        detectRisk(data.reply || '');
+    } catch (e) {
+        const typing = document.getElementById('typingMsg');
+        if (typing) typing.remove();
+        addMessage('assistant', '网络错误，请检查服务是否启动');
+    } finally {
+        isSending = false;
+        document.getElementById('sendBtn').disabled = false;
+        input.focus();
+    }
+}
+
+function quickSend(text) {
+    document.getElementById('msgInput').value = text;
+    send();
+}
+function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+}
+function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ===== Risk Detection =====
+function detectRisk(text) {
+    const badge = document.getElementById('topbarBadge');
+    const lower = text.toLowerCase();
+    if (lower.includes('自杀') || lower.includes('自残') || lower.includes('不想活')) {
+        badge.innerHTML = '<span class="topbar-badge badge-risk-high">极高风险</span>';
+    } else if (lower.includes('严重抑郁') || lower.includes('极度焦虑') || lower.includes('恐慌')) {
+        badge.innerHTML = '<span class="topbar-badge badge-risk-high">高风险</span>';
+    } else if (lower.includes('焦虑') || lower.includes('失眠') || lower.includes('压力')) {
+        badge.innerHTML = '<span class="topbar-badge badge-risk-medium">中风险</span>';
+    } else {
+        badge.innerHTML = '<span class="topbar-badge badge-risk-low">低风险</span>';
+    }
+}
+
+// ===== Records (from backend API) =====
+let records = [];
+function showChat() {
+    document.getElementById('chatView').style.display = '';
+    document.getElementById('recordsPanel').classList.remove('show');
+    document.getElementById('navChat').classList.add('active');
+    document.getElementById('navRecords').classList.remove('active');
+}
+async function showRecords() {
+    document.getElementById('chatView').style.display = 'none';
+    document.getElementById('recordsPanel').classList.add('show');
+    document.getElementById('navChat').classList.remove('active');
+    document.getElementById('navRecords').classList.add('active');
+    await fetchRecords();
+    renderRecords();
+}
+async function fetchRecords() {
+    if (!token) return;
+    try {
+        const res = await fetch(API + '/api/chat/records', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            records = data || [];
+        }
+    } catch (e) {
+        console.error('Failed to fetch records', e);
+    }
+}
+function renderRecords() {
+    const el = document.getElementById('recordsList');
+    if (records.length === 0) {
+        el.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">暂无记录，结束对话后将自动生成心理监护记录。</p>';
+        return;
+    }
+    el.innerHTML = records.map(r => {
+        const risk = r.riskLevel || 'LOW';
+        const riskClass = risk === 'LOW' ? 'low' : risk === 'MEDIUM' ? 'medium' : 'high';
+        const emotion = r.emotionLabel || 'NORMAL';
+        const time = r.recordedAt ? r.recordedAt.replace('T', ' ').slice(0, 16) : '';
+        const summary = r.conversationSummary || '';
+        return `
+        <div class="record-card">
+            <div class="record-top">
+                <div class="record-tags">
+                    <span class="record-tag badge-risk-${riskClass}">${risk}</span>
+                    <span class="record-tag" style="background:rgba(88,166,255,0.1);color:var(--accent);">${emotion}</span>
+                </div>
+                <span class="record-time">${time}</span>
+            </div>
+            <div class="record-summary">${escapeHtml(summary)}</div>
+        </div>`;
+    }).join('');
+}
+
+// ===== Utility =====
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML.replace(/\n/g, '<br>');
+}
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+}
+
+if (window.innerWidth <= 768) {
+    document.getElementById('menuBtn').style.display = 'block';
+}
+</script>
+
+</body>
+</html>
