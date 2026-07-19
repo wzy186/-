@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  sparsekv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sparsekv-engine:latest
+    container_name: sparsekv-engine
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./benchmark_results:/workspace/sparsekv-engine/benchmark_results
+    # 覆盖默认命令，保持容器运行便于交互
+    # command: tail -f /dev/null
