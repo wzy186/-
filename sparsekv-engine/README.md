@@ -104,12 +104,3 @@ llm = LLM(
 - per-head scale，适应不同 head 的数值分布
 - 量化/反量化均为 CUDA Kernel，无 CPU 往返
 
-## 面试讲法（STAR）
-
-**Situation**：长文本推理显存瓶颈严重，原版 vLLM 在 32K 以上序列时显存爆炸。  
-**Task**：在 vLLM 中实现 KV Cache 稀疏化 + 量化，不损失精度前提下提升吞吐。  
-**Action**：
-1. 分析长文本 attention 分布，发现 70% KV 注意力分数极低
-2. 手写 CUDA Kernel，只保留 Top-30% KV，用 FP8 量化存储
-3. 实现 vLLM Backend 插件，自动根据序列长度切换策略
-**Result**：最大支持长度从 32K → 128K，吞吐提升 2.7 倍，精度损失 < 1%。
