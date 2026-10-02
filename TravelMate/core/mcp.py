@@ -95,6 +95,7 @@ def _init_registry():
     from tools.budget_tool import BudgetTool
     from tools.attraction import AttractionTool
     from tools.translate import TranslateTool
+    from tools.train import TrainTool
 
     tool_instances = {
         "weather": WeatherTool(),
@@ -108,6 +109,7 @@ def _init_registry():
         "nearby": AmapTool("nearby"),
         "geocode": AmapTool("geocode"),
         "district": AmapTool("district"),
+        "train": TrainTool(),
     }
 
     # Query tools
@@ -134,6 +136,8 @@ def _init_registry():
             parameters={"type": "object", "properties": {"address": {"type": "string", "description": "地址"}}}),
         "district": ToolSchema(name="district", description="行政区划查询", category="query",
             parameters={"type": "object", "properties": {"keywords": {"type": "string", "description": "查询词"}}}),
+        "train": ToolSchema(name="train", description="查询火车票/高铁票（12306，余票+票价+历时）", category="query",
+            parameters={"type": "object", "properties": {"from_station": {"type": "string", "description": "出发城市/车站"}, "to_station": {"type": "string", "description": "到达城市/车站"}, "date": {"type": "string", "description": "出发日期"}}}),
     }
 
     # Action tools
@@ -150,6 +154,8 @@ def _init_registry():
             parameters={"type": "object", "properties": {"text": {"type": "string", "description": "提醒内容"}, "date": {"type": "string", "description": "日期"}, "type": {"type": "string", "description": "提醒类型"}}}),
         "set_note": ToolSchema(name="set_note", description="添加行程备注", category="action",
             parameters={"type": "object", "properties": {"key": {"type": "string", "description": "备注key"}, "content": {"type": "string", "description": "备注内容"}}}),
+        "book_train_ticket": ToolSchema(name="book_train_ticket", description="预订火车票/高铁票", category="action",
+            parameters={"type": "object", "properties": {"train_no": {"type": "string", "description": "车次"}, "from_station": {"type": "string", "description": "出发站"}, "to_station": {"type": "string", "description": "到达站"}, "date": {"type": "string", "description": "出发日期"}, "seat_type": {"type": "string", "description": "座位类型"}, "passenger": {"type": "string", "description": "乘客"}, "price": {"type": "number", "description": "票价"}, "depart_time": {"type": "string", "description": "发车时间"}, "arrive_time": {"type": "string", "description": "到达时间"}}}),
     }
 
     # Unified executor for query tools
@@ -209,6 +215,18 @@ def _init_registry():
             save_note(args.get("key", "note"), args.get("content", ""), username)
             return json.dumps({"success": True, "message": "✅ 已保存备注"}, ensure_ascii=False), True
 
+        if name == "book_train_ticket":
+            booking_id = add_booking({
+                "type": "train", "name": f"{args.get('train_no','')} {args.get('from_station','')}→{args.get('to_station','')}",
+                "train_no": args.get("train_no", ""), "route": f"{args.get('from_station','')}→{args.get('to_station','')}",
+                "date": args.get("date", "待确认"), "depart": args.get("depart_time", ""), "arrive": args.get("arrive_time", ""),
+                "price": args.get("price", 0), "passenger": args.get("passenger", ""),
+                "seat": args.get("seat_type", "二等座"), "meal": "", "status": "已确认",
+            }, username)
+            return json.dumps({"success": True, "booking_id": booking_id,
+                "message": f"✅ 火车票预订成功！订单号: {booking_id}\n{args.get('train_no','')} {args.get('from_station','')}→{args.get('to_station','')} | {args.get('date','')} | {args.get('seat_type','二等座')} ¥{args.get('price',0)} | 乘客: {args.get('passenger','')}"
+            }, ensure_ascii=False), True
+
         return json.dumps({"error": f"Unknown action tool: {name}"}, ensure_ascii=False), False
 
     # Register all
@@ -220,3 +238,18 @@ def _init_registry():
 
 # Auto-initialize on import
 _init_registry()
+
+
+def _start_remote_mcp():
+    """启动外部 MCP server（高德/12306等）的后台注册。
+
+    未配置 MCP_<NAME>_* 环境变量时什么都不做；连接失败静默降级到本地工具。
+    """
+    try:
+        from core.mcp_client import register_remote_tools
+        register_remote_tools(background=True)
+    except Exception:
+        pass
+
+
+_start_remote_mcp()

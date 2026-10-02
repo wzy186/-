@@ -35,40 +35,52 @@ TravelMate 是一个功能完整的 AI 出行助手，采用 **图编排 Agent �
 ## 核心架构
 
 ```
-用户输入 → Streamlit UI → StateGraph Agent
+用户输入 → Streamlit UI → 多 Agent 编排图（Supervisor + 4 专家子图）
                               │
-                 ┌────────────┴────────────┐
-                 │                         │
-          Guardrails 护栏           8 节点有向图
-          ├─ 输入校验               ├─ load_context
-          │  ├─ Prompt 注入检测     ├─ guardrail_input ──→ 拦截
-          │  ├─ 有害内容拦截        ├─ llm_call (OpenAI / Mock)
-          │  └─ PII 泄露警告        ├─ parse_tools
-          └─ 输出校验               ├─ execute_tools ──→ HITL 中断
-                                     ├─ format_reply
-                                     ├─ guardrail_output
-                                     └─ finalize
-                                           │
-                              ┌────────────┴────────────┐
-                              │                         │
-                        MCP 工具层                  RAG 知识库
-                        ├─ 11 查询工具              ├─ TF-IDF 索引
-                        │  ├─ weather               ├─ BM25 检索
-                        │  ├─ flight                └─ 10 城市知识文件
-                        │  ├─ hotel                     │
-                        │  ├─ exchange              记忆系统
-                        │  ├─ translate              ├─ 短期会话记忆
-                        │  ├─ attraction             ├─ 长期用户画像
-                        │  ├─ budget                 └─ 多用户隔离
-                        │  └─ amap (4子工具)
-                        └─ 6 操作工具（需 HITL 确认）
-                           ├─ book_flight
-                           ├─ book_hotel
-                           ├─ add_spot
-                           ├─ save_phrase
-                           ├─ add_reminder
-                           └─ set_note
+                 ┌────────────┴──────────────────┐
+                 │                               │
+          顶层通用节点                     Supervisor 调度 Agent
+          ├─ load_context（画像+RAG）      ├─ LLM 意图识别（JSON 任务单）
+          ├─ guardrail_input（护栏）       ├─ Mock 关键词路由（无 Key 兜底）
+          ├─ guardrail_output（护栏）      ├─ 复合意图拆分（最多 3 任务）
+          └─ finalize（多回答合并）         └─ 任务队列 + 顺序派发
+                                                 │
+              ┌──────────────┬───────────────────┼──────────────────┐
+              │              │                   │                  │
+        route_agent     ticket_agent       travel_agent         qa_agent
+        路线规划Agent    票务Agent           行程规划Agent        问答Agent
+        ├─ route        ├─ train(12306)    ├─ weather           ├─ RAG 检索
+        ├─ nearby       ├─ flight          ├─ hotel             └─ 知识问答
+        ├─ geocode      ├─ book_flight     ├─ attraction
+        └─ district     └─ book_train_     ├─ budget/exchange/
+        (高德 MCP)         ticket(HITL)       translate
+                        (12306 MCP)        └─ book_hotel 等(HITL)
+              │
+   每个子 Agent = 独立 ReAct 子图（react_llm → parse_tools → react_exec 循环，
+   最多 3 轮；操作类工具触发 HITL 中断冒泡到顶层，确认后恢复）
+              │
+   ┌──────────┴──────────────┐
+   MCP 统一工具注册表          RAG 知识库 / 记忆系统
+   ├─ 本地 12 查询 + 7 操作    ├─ TF-IDF + BM25
+   └─ 外部 MCP Server 动态     └─ 10 城市 114 切片
+      注册（高德/12306…）
 ```
+
+### 外部 MCP Server 接入
+
+在 `.env` 中配置即可自动发现并注册远端工具（连接失败自动降级到本地工具）：
+
+```bash
+# 高德官方 MCP（Streamable HTTP）
+MCP_AMAP_MODE=http
+MCP_AMAP_URL=https://mcp.amap.com/mcp?key=你的高德Key
+
+# 12306 火车票 MCP（stdio，需 Node.js）
+MCP_12306_MODE=stdio
+MCP_12306_COMMAND=npx -y 12306-mcp
+```
+
+远端工具以 `mcp_<server>_<tool>` 命名注册进统一工具注册表，票务/路线 Agent 会自动将其纳入专属工具白名单。
 
 ## 项目结构
 
@@ -76,18 +88,25 @@ TravelMate 是一个功能完整的 AI 出行助手，采用 **图编排 Agent �
 TravelMate/
 ├── app.py                        # Streamlit 主界面（登录/侧边栏/22页面路由）
 ├── core/                         # Agent 核心引擎
-│   ├── agent.py                  # 图驱动 Agent（8节点 StateGraph + HITL）
-│   ├── graph.py                  # StateGraph 图编排引擎（节点/边/条件路由/中断恢复）
+│   ├── agent.py                  # 多 Agent 编排入口（process/resume，兼容旧接口）
+│   ├── graph.py                  # StateGraph 引擎（节点/条件路由/子图嵌入/中断恢复）
+│   ├── agents/                   # 多 Agent 编排层
+│   │   ├── supervisor.py         # 调度 Agent（LLM 意图识别 + 关键词兜底 + 任务拆分）
+│   │   ├── base_nodes.py         # 专家子 Agent 工厂（可配置 ReAct 子图）
+│   │   ├── configs.py            # 4 个专家 Agent 配置（路线/票务/行程/问答）
+│   │   └── nodes.py              # 顶层通用节点（上下文/护栏/收尾）
+│   ├── mcp.py                    # MCP 统一工具注册表（本地 + 远端动态注册）
+│   ├── mcp_client.py             # 通用 MCP 客户端（stdio + Streamable HTTP）
 │   ├── guardrails.py             # 输入/输出护栏（注入检测/内容安全/PII警告）
-│   ├── mcp.py                    # MCP 兼容工具协议（17工具Schema + 统一执行器）
 │   ├── llm.py                    # LLM 客户端（OpenAI + Mock + 3城市×3档次数据）
-│   ├── prompts.py                # 11 个 Prompt 模板
+│   ├── prompts.py                # Prompt 模板
 │   ├── memory.py                 # 记忆系统（用户画像 + 会话 + 旅行记录，多用户隔离）
 │   └── rag.py                    # RAG 引擎（TF-IDF + BM25，10城市114切片）
 ├── tools/                        # 工具层
 │   ├── base.py                   # 工具基类
 │   ├── weather.py                # 天气查询（7日预报 + 穿衣 + 健康提示）
 │   ├── flight.py                 # 航班查询（多航司比价 + 机型/餐食/WiFi）
+│   ├── train.py                  # 火车票查询（12306 Mock，MCP 优先）
 │   ├── hotel.py                  # 酒店推荐（星级/评分/设施/区域指南）
 │   ├── exchange.py               # 汇率换算（12种货币）
 │   ├── translate.py              # 多语言翻译（8种语言）

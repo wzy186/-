@@ -24,6 +24,8 @@ class AgentState:
     pending_actions: list[dict] = field(default_factory=list)
     error: str = ""
     metadata: dict = field(default_factory=dict)
+    # 多 Agent 调度：supervisor 派发的子任务队列 [{"agent": str, "instruction": str}]
+    tasks: list[dict] = field(default_factory=list)
     # Tracing
     trace: list[dict] = field(default_factory=list)
 
@@ -37,6 +39,7 @@ class AgentState:
             "needs_confirmation": self.needs_confirmation,
             "pending_actions": self.pending_actions, "error": self.error,
             "metadata": self.metadata, "trace": self.trace,
+            "tasks": self.tasks,
         }
 
 
@@ -56,6 +59,20 @@ class StateGraph:
 
     def add_node(self, name: str, func: NodeFunc):
         self.nodes[name] = func
+
+    def add_subgraph(self, name: str, subgraph: "CompiledGraph"):
+        """将一个编译好的子图（子 Agent）作为节点嵌入当前图。
+
+        父图与子图共享同一个 AgentState；子图执行产生的 thinking / trace /
+        tool_results / interrupt 都直接反映在共享状态上。
+        子图内部发生 HITL 中断时，状态带 interrupted=True 返回，
+        由父图的条件边或引擎中断检查接管。
+        """
+
+        def _run_subgraph(state: AgentState) -> AgentState:
+            return subgraph.invoke(state)
+
+        self.nodes[name] = _run_subgraph
 
     def add_edge(self, from_node: str, to_node: str):
         self.edges[from_node] = to_node

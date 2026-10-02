@@ -1,0 +1,215 @@
+"""四个专家子 Agent 的配置：路线规划（高德）/ 票务（12306+航班）/ 行程规划 / 知识问答。"""
+
+from __future__ import annotations
+
+import json
+
+from core.agents.base_nodes import SpecialistConfig
+from core.memory import get_profile
+
+# ────────────────────────── 工具结果 → 文本摘要（Mock 收尾用）──────────────────────────
+
+
+def _summarize_results(state) -> str:
+    parts = []
+    for tr in state.tool_results:
+        data = tr.get("result", {})
+        if isinstance(data, dict) and data.get("message"):
+            parts.append(data["message"])
+        elif isinstance(data, dict) and data:
+            # 无 message 字段时输出紧凑摘要
+            parts.append(json.dumps(data, ensure_ascii=False)[:400])
+    return "\n\n".join(parts) if parts else ""
+
+
+# ────────────────────────── 1. 路线规划 Agent（高德）──────────────────────────
+
+ROUTE_AGENT_PROMPT = """你是 TravelMate 的路线规划专家（路线Agent），专注地图与出行导航：
+- 路线规划：驾车/公交/步行/骑行，给出距离、耗时、换乘方案、费用
+- 周边搜索：目的地附近的餐厅/便利店/药店/充电站等
+- 地理编码与行政区划：地址→坐标、城市区域信息
+- 善用用户提供的城市与地点信息；结果要具体（车次/线路/分钟数/价格），不说空话。
+- 若用户问题与路线/地图无关，简短说明并建议咨询其他模块。
+
+回答要求：结构化输出路线步骤或 POI 列表，包含耗时、费用、贴士。"""
+
+
+def _route_mock(state, instruction: str, iters: int) -> str:
+    if iters > 0:
+        return _summarize_results(state) or "已为您完成路线查询。"
+    text = instruction.lower()
+    if any(k in text for k in ["附近", "周边", "餐厅", "便利店", "药店", "厕所", "加油站"]):
+        kw = "餐厅"
+        for k in ["便利店", "药店", "加油站", "餐厅"]:
+            if k in text:
+                kw = k
+                break
+        return f'[call:nearby] {{"location_name":"目的地","keywords":"{kw}","radius":3000}}'
+    if any(k in text for k in ["路线", "怎么走", "怎么去", "导航", "多远", "驾车", "公交", "地铁", "步行", "骑行"]):
+        mode = "驾车"
+        for m in [("公交", "公交"), ("地铁", "公交"), ("步行", "步行"), ("骑行", "骑行"), ("驾车", "驾车")]:
+            if m[0] in text:
+                mode = m[1]
+                break
+        return f'[call:route] {{"origin_name":"出发点","destination_name":"目的地","mode":"{mode}"}}'
+    return '[call:geocode] {"address":"目的地"}'
+
+
+# ────────────────────────── 2. 票务 Agent（12306 MCP + 航班）──────────────────────────
+
+TICKET_AGENT_PROMPT = """你是 TravelMate 的票务专家（票务Agent），负责火车票与机票：
+- 火车票：通过 train 工具查询 12306 余票/票价/历时（若 12306 MCP 已接入会自动提供 mcp_12306_* 工具，优先使用）
+- 机票：通过 flight 工具查询多航司比价
+- 预订：确认车次/航班与乘客信息后，调用 book_train_ticket / book_flight 执行预订
+- 预订缺少乘客姓名或日期时，先追问再调用操作工具
+- 结果要具体：车次/航班号、时刻、座位类型、价格。
+
+回答要求：以表格或列表呈现可选车次/航班，标注推荐项（最快/最便宜）。"""
+
+
+def _ticket_mock(state, instruction: str, iters: int) -> str:
+    if iters > 0:
+        text = _summarize_results(state)
+        if text:
+            return text + "\n\n如需预订，请告诉我乘客姓名，我会为您执行预订（需确认）。"
+        return "已完成票务查询。"
+    text = instruction.lower()
+    # 提取城市与日期
+    cities = ["北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "重庆", "武汉", "西安",
+              "郑州", "长沙", "天津", "青岛", "苏州", "厦门", "昆明", "哈尔滨", "沈阳", "大连",
+              "东京", "巴黎", "曼谷", "首尔", "伦敦", "纽约", "悉尼", "迪拜", "罗马", "巴厘岛"]
+    found = [c for c in cities if c in instruction]
+    date = ""
+    import re
+    m = re.search(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}月\d{1,2}[号日]?)", instruction)
+    if m:
+        date = m.group(1)
+    train_like = any(k in text for k in ["火车", "高铁", "动车", "12306", "车票", "余票", "订火车"])
+    flight_like = any(k in text for k in ["机票", "航班", "飞", "订飞机"])
+    if not train_like and not flight_like:
+        train_like = "订票" in text or "买票" in text
+        flight_like = not train_like
+    if train_like and len(found) >= 2:
+        return (f'[call:train] {{"from_station":"{found[0]}","to_station":"{found[1]}","date":"{date}"}}'
+                f"\n\n正在为您查询 {found[0]}→{found[1]} 的车次…")
+    if flight_like and len(found) >= 2:
+        # 明确的预订意图 + 已知乘客 → 查询后直接发起预订（走 HITL 确认）
+        wants_book = any(k in text for k in ["订", "预订", "买", "book"])
+        if wants_book:
+            passenger = ""
+            m = re.search(r"乘客[是为：:\s]*(\S+)", instruction)
+            if m:
+                passenger = m.group(1).rstrip("。，,")
+            else:
+                profile = get_profile()
+                passenger = (profile or {}).get("name", "")
+            if passenger:
+                return (f'[call:flight] {{"departure":"{found[0]}","destination":"{found[1]}","date":"{date}"}}'
+                        f"\n\n根据查询结果，为您预订最便宜的航班："
+                        f"\n\n[call:book_flight] {{\"airline\":\"春秋 9C8515\",\"departure\":\"{found[0]}\","
+                        f"\"arrival\":\"{found[1]}\",\"date\":\"{date}\",\"passenger\":\"{passenger}\","
+                        f"\"price\":1500,\"seat\":\"无偏好\",\"meal\":\"标准\"}}")
+        return (f'[call:flight] {{"departure":"{found[0]}","destination":"{found[1]}","date":"{date}"}}'
+                f"\n\n正在为您查询 {found[0]}→{found[1]} 的航班…")
+    if train_like or flight_like:
+        tool = "train" if train_like else "flight"
+        return f'[call:{tool}] {{"from_station":"北京","to_station":"上海","date":"{date}"}}' if train_like \
+            else f'[call:{tool}] {{"departure":"北京","destination":"上海","date":"{date}"}}'
+    return "请告诉我出发地、目的地和日期，我来帮您查询车次或航班。"
+
+
+# ────────────────────────── 3. 行程规划 Agent ──────────────────────────
+
+TRAVEL_AGENT_PROMPT = """你是 TravelMate 的行程规划专家（行程Agent），负责旅行全流程服务：
+- 行程规划：按目的地/天数/预算/风格生成逐日行程（景点编排就近、含交通与餐食推荐）
+- 酒店/天气/景点/预算/汇率/翻译：调用对应工具查询后综合建议
+- 操作：book_hotel 预订酒店、add_spot 加行程、save_phrase 收藏短语、add_reminder 设提醒、set_note 记备注
+- 参考用户偏好画像个性化推荐；结果具体（价格/时段/评分）。
+
+回答要求：行程按 Day 1/Day 2… 结构化输出，含每日主题、景点、交通、餐食、费用小计。"""
+
+
+def _travel_mock(state, instruction: str, iters: int) -> str:
+    if iters > 0:
+        return _summarize_results(state) or "已完成行程服务。"
+    text = instruction.lower()
+    if "汇率" in text or "换算" in text:
+        return '[call:exchange] {"amount": 1000, "from": "CNY", "to": "JPY"}'
+    if "翻译" in text:
+        return '[call:translate] {"text": "谢谢", "target": "ja"}'
+    if "预算" in text:
+        import re
+        m = re.search(r"(\d+)", instruction)
+        budget = m.group(1) if m else "15000"
+        return f'[call:budget] {{"budget": {budget}, "days": 5, "destination": "目的地"}}'
+    if "天气" in text:
+        import re
+        m = re.search(r"(东京|巴黎|曼谷|首尔|伦敦|纽约|悉尼|迪拜|罗马|巴厘岛|北京|上海)", instruction)
+        city = m.group(1) if m else "东京"
+        return f'[call:weather] {{"destination":"{city}","days":7}}'
+    if "酒店" in text and ("订" in text or "推荐" in text or "预订" in text):
+        guest = get_profile().get("name", "张三") if get_profile() else "张三"
+        return (f'[call:hotel] {{"destination":"目的地","budget_per_night":800,"style":"舒适"}}'
+                f"\n\n[call:book_hotel] {{\"name\":\"推荐酒店\",\"city\":\"目的地\",\"check_in\":\"待确认\","
+                f"\"check_out\":\"待确认\",\"guest\":\"{guest}\",\"room_type\":\"标准间\",\"price_per_night\":600,"
+                f"\"nights\":1,\"guests\":1}}")
+    if "加入行程" in text or "添加景点" in text or ("加" in text and "行程" in text):
+        import re
+        m = re.search(r"把(.+?)加入", instruction)
+        spot = m.group(1) if m else "景点"
+        return f'[call:add_spot] {{"name":"{spot}","city":"","note":"用户添加"}}'
+    if "提醒" in text or "别忘了" in text:
+        content = instruction.replace("提醒我", "").replace("别忘了", "").strip()[:50]
+        return f'[call:add_reminder] {{"text":"{content}","date":"","type":"旅行提醒"}}'
+    # 默认：行程规划
+    return "好的，我按标准行程为您安排（Mock 模式）。如需查询天气/酒店/预算，请明确告诉我。"
+
+
+# ────────────────────────── 4. 问答 Agent（RAG）─────────────────────────────────
+
+QA_AGENT_PROMPT = """你是 TravelMate 的目的地知识专家（问答Agent）：
+- 回答签证、交通、美食、安全、文化习俗、紧急求助等目的地知识问题
+- 优先使用检索到的知识库上下文（标注在 system prompt 中）；没有依据时给出常识性建议并说明
+- 回答结构化、实用，涉及紧急情况时优先给求助电话与短语。"""
+
+
+def _qa_mock(state, instruction: str, iters: int) -> str:
+    rag = state.metadata.get("rag_context", "")
+    if rag:
+        snippet = rag.strip()[:800]
+        return f"根据知识库检索结果：\n\n{snippet}\n\n（Mock 模式：以上为 RAG 检索片段摘要。配置 LLM_API_KEY 可获得完整智能问答。）"
+    return ("我是问答Agent（Mock 模式）。我可以回答目的地签证、交通、美食、安全等问题；"
+            "配置 LLM_API_KEY 后将获得基于 RAG 知识库的完整智能回答。")
+
+
+# ────────────────────────── 汇总 ──────────────────────────
+
+SPECIALISTS: dict[str, SpecialistConfig] = {
+    "route_agent": SpecialistConfig(
+        name="route_agent", label="路线规划Agent",
+        system_prompt=ROUTE_AGENT_PROMPT,
+        tools={"route", "nearby", "geocode", "district"},
+        remote_prefixes=("mcp_amap",),
+        mock=_route_mock, mock_intent="route",
+    ),
+    "ticket_agent": SpecialistConfig(
+        name="ticket_agent", label="票务Agent",
+        system_prompt=TICKET_AGENT_PROMPT,
+        tools={"train", "flight", "book_train_ticket", "book_flight"},
+        remote_prefixes=("mcp_12306",),
+        mock=_ticket_mock, mock_intent="ticket",
+    ),
+    "travel_agent": SpecialistConfig(
+        name="travel_agent", label="行程规划Agent",
+        system_prompt=TRAVEL_AGENT_PROMPT,
+        tools={"weather", "hotel", "attraction", "budget", "exchange", "translate",
+               "book_hotel", "add_spot", "save_phrase", "add_reminder", "set_note"},
+        mock=_travel_mock, mock_intent="",
+    ),
+    "qa_agent": SpecialistConfig(
+        name="qa_agent", label="问答Agent",
+        system_prompt=QA_AGENT_PROMPT,
+        tools=set(),
+        mock=_qa_mock, mock_intent="",
+    ),
+}
