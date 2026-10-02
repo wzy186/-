@@ -1,0 +1,16 @@
+server:
+  port: 8082
+mysql:
+  dsn: root:@tcp(127.0.0.1:3306)/doudshengsheng?charset=utf8mb4&parseTime=True&loc=Local
+redis:
+  addr: 127.0.0.1:6379
+  password: ""
+  db: 1
+ai:
+  deepseek:
+    apiKey: ${DEEPSEEK_API_KEY}  # 从环境变量读,不进仓库
+    baseUrl: https://api.deepseek.com
+    model: deepseek-chat
+  ollama:
+    baseUrl: http://localhost:11434
+    embeddingModel: nomic-embed-text

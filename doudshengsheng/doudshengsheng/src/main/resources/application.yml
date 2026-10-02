@@ -1,0 +1,48 @@
+server:
+  port: 8081
+
+spring:
+  profiles:
+    include: ai-key
+  application:
+    name: doudshengsheng
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/doudshengsheng?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+    username: root
+    password:
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    database: 0
+    lettuce:
+      pool:
+        max-active: 16
+        max-idle: 8
+        min-idle: 0
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl  # 压测时关闭 SQL 日志
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+logging:
+  level:
+    com.dss: debug
+
+dss:
+  # 业务前缀
+  redis:
+    prefix: dss
+  # 红包雨配置
+  redpacket:
+    # 未领红包退款延迟(秒),演示用 120s,生产 86400
+    refund-delay-seconds: 120
+    # 单用户限流:窗口内最大抢红包次数
+    rate-limit-window-seconds: 10
+    rate-limit-max: 3

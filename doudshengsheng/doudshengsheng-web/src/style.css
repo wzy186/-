@@ -1,0 +1,47 @@
+:root {
+  /* 品牌色:省钱橙红,克制不刺眼 */
+  --brand: #FF5A36;
+  --brand-dark: #E64A28;
+  --brand-light: #FFF1EC;
+  --ink: #1A1A1A;
+  --ink-2: #4A4A4A;
+  --ink-3: #8A8A8A;
+  --line: #ECECEC;
+  --bg: #F7F7F5;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.06);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.10);
+  --radius: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+a { text-decoration: none; color: inherit; }
+
+.page { padding: 24px 28px; max-width: 1200px; margin: 0 auto; }
+.page-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.page-sub { color: var(--ink-3); font-size: 13px; margin-bottom: 20px; }
+
+.card { background: #fff; border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: var(--shadow-sm); border: 1px solid var(--line); }
+.card h3 { font-size: 16px; font-weight: 600; }
+.card-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+.muted { color: var(--ink-3); font-size: 13px; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.amount { color: var(--brand); font-weight: 600; }
+.tag-brand { background: var(--brand-light); color: var(--brand-dark); }
+
+/* 覆盖 element-plus 主色,统一品牌调 */
+.el-button--primary { --el-color-primary: var(--brand); --el-color-primary-light-3: #FF7B5E; --el-color-primary-dark-2: var(--brand-dark); }
+.el-button--danger { --el-color-danger: var(--brand); --el-color-danger-light-3: #FF7B5E; }
+.el-menu-item.is-active { color: var(--brand) !important; }
+.el-menu-item.is-active::after { background: var(--brand) !important; }
+.el-radio-button__original:checked + .el-radio-button__inner { background: var(--brand) !important; border-color: var(--brand) !important; box-shadow: -1px 0 0 0 var(--brand) !important; }
+
+/* 移动端:页面 padding 缩小 */
+@media (max-width: 768px) {
+  .page { padding: 14px 14px 32px; }
+  .page-title { font-size: 18px; }
+  .card { padding: 14px; }
+}

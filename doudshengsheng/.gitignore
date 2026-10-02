@@ -1,0 +1,20 @@
+# ===== 敏感配置(含 API key,绝不进仓库)=====
+**/config.local.yaml
+**/ai-key.local.properties
+**/application-ai-key.yml
+
+# ===== Java 后端 =====
+doudshengsheng/target/
+doudshengsheng/*.jar
+
+# ===== Go 后端 =====
+doudshengsheng-go/doudshengsheng-go
+
+# ===== 前端 =====
+doudshengsheng-web/node_modules/
+doudshengsheng-web/dist/
+doudshengsheng-web/.vite/
+
+# ===== 日志/系统 =====
+*.log
+.DS_Store
