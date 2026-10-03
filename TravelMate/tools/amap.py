@@ -37,35 +37,132 @@ class AmapTool(BaseTool):
             elif self.action == "district":
                 return self._district(args)
         except Exception as e:
-            return json.dumps({"error": str(e), "fallback": "使用模拟数据"}, ensure_ascii=False)
+            return json.dumps({"success": False, "error": str(e),
+                               "message": f"⚠️ 高德API调用失败: {e}，请检查 AMAP_API_KEY 是否有效"}, ensure_ascii=False)
         return "未知操作"
 
     # ── Real API calls ──
 
+    def _resolve_location(self, value: str, fallback_hint: str = "") -> str:
+        """地名 → 坐标（"lon,lat"）。已是坐标直接返回；否则调地理编码解析。"""
+        value = (value or "").strip()
+        if not value:
+            value = fallback_hint
+        if not value:
+            return ""
+        import re
+        if re.match(r"^-?\d+\.?\d*\s*,\s*-?\d+\.?\d*$", value):
+            return value.replace(" ", "")
+        result = json.loads(self._geocode({"address": value}))
+        geocodes = (result or {}).get("geocodes") or []
+        if not geocodes:
+            raise ValueError(f"无法解析地点坐标: {value}（可尝试加上城市名，如'北京市中关村'）")
+        return geocodes[0]["location"]
+
     def _route(self, args: dict) -> str:
-        origin = args.get("origin", "")
-        destination = args.get("destination", "")
-        strategy = args.get("strategy", "0")
-        url = "https://restapi.amap.com/v3/direction/driving"
-        params = {"key": self.key, "origin": origin, "destination": destination, "strategy": strategy}
+        # 支持地名或坐标：origin_name/destination_name 优先，其次 origin/destination
+        origin = self._resolve_location(
+            args.get("origin_name") or args.get("origin") or "", "起点")
+        destination = self._resolve_location(
+            args.get("destination_name") or args.get("destination") or "", "终点")
+        mode = (args.get("mode") or "驾车").strip()
+
+        # 公交/transit 接口
+        if "公交" in mode or "地铁" in mode or "transit" in mode.lower():
+            url = "https://restapi.amap.com/v3/direction/transit/integrated"
+            params = {"key": self.key, "origin": origin, "destination": destination,
+                      "city": args.get("city", "北京"), "strategy": "0"}
+            r = httpx.get(url, params=params, timeout=10)
+            return self._format_route_response(r.json(), mode, origin, destination)
+
+        # 步行 / 骑行 / 驾车
+        if "步行" in mode:
+            url = "https://restapi.amap.com/v3/direction/walking"
+        elif "骑行" in mode or "自行车" in mode:
+            url = "https://restapi.amap.com/v5/direction/bicycling"
+        else:
+            url = "https://restapi.amap.com/v3/direction/driving"
+        params = {"key": self.key, "origin": origin, "destination": destination}
+        if url.endswith("driving"):
+            params["strategy"] = args.get("strategy", "0")
         r = httpx.get(url, params=params, timeout=10)
-        return r.text
+        return self._format_route_response(r.json(), mode, origin, destination)
+
+    def _format_route_response(self, data: dict, mode: str, origin: str, destination: str) -> str:
+        """把高德原始响应整理成精简结构，并附原始数据。"""
+        status = data.get("status") == "1"
+        if not status:
+            info = data.get("info", "未知错误")
+            return json.dumps({"success": False, "message": f"⚠️ 高德路线查询失败: {info}",
+                               "origin": origin, "destination": destination}, ensure_ascii=False)
+        route = data.get("route", {})
+        out = {"success": True, "mode": mode, "origin": origin, "destination": destination}
+        if mode == "公交":
+            transits = []
+            for t in (route.get("transits") or [])[:3]:
+                segs = []
+                for seg in (t.get("segments") or []):
+                    bus = (seg.get("bus") or {}).get("buslines") or []
+                    for b in bus[:2]:
+                        segs.append(f"{b.get('name','')}（{(b.get('departure_stop') or {}).get('name','')}→{(b.get('arrival_stop') or {}).get('name','')}）")
+                    walk = seg.get("walking")
+                    if walk and walk.get("distance") not in (None, "0"):
+                        segs.append(f"步行{walk.get('distance')}米")
+                transits.append({"duration_min": round(int(t.get("duration", 0)) / 60),
+                                 "walking_m": t.get("walking_distance", "0"),
+                                 "price": t.get("cost", ""),
+                                 "segments": segs})
+            out["transits"] = transits
+            out["message"] = f"高德公交路线：{origin}→{destination}，共{len(transits)}个方案" if transits else "未找到公交方案"
+        else:
+            paths = route.get("paths") or []
+            p0 = paths[0] if paths else {}
+            steps = [s.get("instruction", "") for s in (p0.get("steps") or [])[:12]]
+            out["distance_km"] = round(int(p0.get("distance", 0)) / 1000, 1)
+            out["duration_min"] = round(int(p0.get("duration", 0)) / 60)
+            out["steps"] = steps
+            out["message"] = (f"高德{mode}路线：{origin}→{destination}，"
+                              f"全程{out['distance_km']}km，约{out['duration_min']}分钟")
+        out["raw"] = data
+        return json.dumps(out, ensure_ascii=False)
 
     def _nearby(self, args: dict) -> str:
-        location = args.get("location", "116.397428,39.90923")
+        location = self._resolve_location(
+            args.get("location_name") or args.get("location") or "116.397428,39.90923")
         keywords = args.get("keywords", "餐厅")
         radius = args.get("radius", 3000)
         url = "https://restapi.amap.com/v3/place/around"
-        params = {"key": self.key, "location": location, "keywords": keywords, "radius": radius}
+        params = {"key": self.key, "location": location, "keywords": keywords,
+                  "radius": radius, "offset": 5}
         r = httpx.get(url, params=params, timeout=10)
-        return r.text
+        data = r.json()
+        if data.get("status") != "1":
+            return json.dumps({"success": False, "message": f"⚠️ 高德周边搜索失败: {data.get('info','')}",
+                               "keywords": keywords}, ensure_ascii=False)
+        pois = [{"name": p.get("name"), "address": p.get("address"),
+                 "distance_m": p.get("distance"), "type": p.get("type")}
+                for p in (data.get("pois") or [])[:8]]
+        return json.dumps({"success": True, "keywords": keywords, "radius": radius,
+                           "count": len(pois), "places": pois,
+                           "message": f"高德周边搜索「{keywords}」：共{len(pois)}个结果"},
+                          ensure_ascii=False)
 
     def _geocode(self, args: dict) -> str:
         address = args.get("address", "")
         url = "https://restapi.amap.com/v3/geocode/geo"
         params = {"key": self.key, "address": address}
         r = httpx.get(url, params=params, timeout=10)
-        return r.text
+        data = r.json()
+        if data.get("status") != "1" or not data.get("geocodes"):
+            return json.dumps({"success": False, "message": f"⚠️ 地理编码失败: {data.get('info','')}（{address}）"},
+                              ensure_ascii=False)
+        g = data["geocodes"][0]
+        return json.dumps({"success": True, "address": address,
+                           "location": g.get("location"), "province": g.get("province"),
+                           "city": g.get("city"), "district": g.get("district"),
+                           "formatted": g.get("formatted_address"),
+                           "message": f"地理编码：{g.get('formatted_address', address)} → {g.get('location')}",
+                           "raw": data}, ensure_ascii=False)
 
     def _district(self, args: dict) -> str:
         keywords = args.get("keywords", "")
