@@ -13,11 +13,55 @@ SpecialistConfig 定义一个子 Agent 的：系统提示词、工具白名单�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 from core.graph import AgentState, CompiledGraph, StateGraph
 from core.llm import chat, is_llm_available
 from core.mcp import execute_tool, get_all_tool_schemas, get_tool_schema
+
+# 兼容多种 LLM 的工具调用输出格式：
+# 1. 约定格式:      [call:toolName] {json}
+# 2. DeepSeek DSML: <｜｜DSML｜｜ invoke name="tool"> {json}
+# 3. 通用 invoke:   <invoke name="tool"> {json}
+# 4. function 标记: <function=tool> {json}
+_CALL_PATTERNS = [
+    re.compile(r"\[call:(\w+)\]\s*(\{[^}]*\})?", re.S),
+    re.compile(r"<｜｜DSML｜｜\s*invoke\s+name=[\"'](\w+)[\"']\s*>\s*(\{[\s\S]*?\})?", re.I),
+    re.compile(r"<invoke\s+name=[\"'](\w+)[\"']\s*>\s*(\{[\s\S]*?\})?", re.I),
+    re.compile(r"<function\s*=\s*[\"']?(\w+)[\"']?\s*>\s*(\{[\s\S]*?\})?", re.I),
+]
+# 回复中需要清除的杂项标记（含闭合标签）
+_LEFTOVER_TAGS = re.compile(
+    r"</?｜｜DSML｜｜[^>]*>|</invoke>|</function[^>]*>|<｜｜DSML｜｜>", re.S)
+
+
+def parse_tool_calls(text: str) -> tuple[list[dict], str]:
+    """从 LLM 回复中解析工具调用，返回 (calls, 清理后的纯文本回复)。"""
+    calls: list[dict] = []
+    spans: list[tuple[int, int]] = []
+    for pat in _CALL_PATTERNS:
+        for m in pat.finditer(text):
+            if any(s <= m.start() < e for s, e in spans):
+                continue  # 与已匹配区间重叠（如 DSML 被 invoke 模式重复命中）
+            args = {}
+            if m.group(2):
+                try:
+                    args = json.loads(m.group(2))
+                except json.JSONDecodeError:
+                    args = {}
+            calls.append({"tool": m.group(1), "args": args})
+            spans.append(m.span())
+    # 按出现顺序排列，并从回复中剥离
+    order = sorted(range(len(spans)), key=lambda i: spans[i][0])
+    calls = [calls[i] for i in order]
+    parts, last = [], 0
+    for s, e in sorted(spans):
+        parts.append(text[last:s])
+        last = e
+    parts.append(text[last:])
+    cleaned = _LEFTOVER_TAGS.sub("", "".join(parts)).strip()
+    return calls, cleaned
 
 
 @dataclass
@@ -77,9 +121,11 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
         if tool_lines:
             system += (
                 "\n\n## 你的专属工具（只能使用这些工具）\n" + tool_lines +
-                '\n\n## 工具调用格式\n[call:toolName] {"param1": "value1"}\n'
+                '\n\n## 工具调用格式（严格遵守）\n[call:toolName] {"param1": "value1"}\n'
                 "规则：\n1. 需要数据时先调用查询工具；2. 拿到结果后综合成完整回答，"
-                "不要把工具调用语法留在最终回复里；3. 用户表达操作意图（预订等）时直接调用操作工具。"
+                "不要把工具调用语法留在最终回复里；3. 用户表达操作意图（预订等）时直接调用操作工具。\n"
+                "4. 工具调用只允许使用 [call:toolName] {json} 这一种格式，"
+                "严禁使用 XML 标签、函数调用标记或其他任何格式。"
             )
 
         task = state.metadata.get("current_task") or {}
@@ -116,21 +162,10 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
         return state
 
     def parse_tools(state: AgentState) -> AgentState:
-        """解析 [call:tool] {json} 语法并从回复中剥离。"""
-        import re
-        reply = state.reply or ""
-        calls = []
-        for m in re.finditer(r"\[call:(\w+)\]\s*(\{[^}]*\})?", reply):
-            tool = m.group(1)
-            args = {}
-            if m.group(2):
-                try:
-                    args = json.loads(m.group(2))
-                except json.JSONDecodeError:
-                    pass
-            calls.append({"tool": tool, "args": args})
+        """解析多格式工具调用语法（约定格式/DeepSeek DSML/通用 invoke）并剥离。"""
+        calls, clean = parse_tool_calls(state.reply or "")
         state.tool_calls = calls
-        state.reply = re.sub(r"\[call:\w+\]\s*(\{[^}]*\})?", "", reply).strip()
+        state.reply = clean
         return state
 
     def react_exec(state: AgentState) -> AgentState:
