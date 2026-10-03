@@ -42,9 +42,10 @@ class TrainTool(BaseTool):
     # ── Mock 数据（结构对齐 12306 MCP 的 query_tickets 输出）──
 
     def _mock(self, args: dict) -> str:
+        from tools._dates import normalize_date
         from_station = args.get("from_station", "北京")
         to_station = args.get("to_station", "上海")
-        date = args.get("date", "") or datetime.now().strftime("%Y-%m-%d")
+        date = normalize_date(args.get("date", ""), default_offset_days=0)
 
         # 路线模板：京沪 / 京广 / 成渝 等，未命中给通用车次
         routes = {

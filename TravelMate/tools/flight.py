@@ -1,5 +1,8 @@
 import json
 import random
+from datetime import datetime, timedelta
+
+from tools._dates import normalize_date
 from tools.base import BaseTool
 
 
@@ -37,7 +40,7 @@ class FlightTool(BaseTool):
     def run(self, args: dict) -> str:
         dep = args.get("departure", args.get("origin", "北京"))
         arr = args.get("arrival", args.get("destination", "东京"))
-        date = args.get("date", "")
+        date = normalize_date(args.get("date", ""), default_offset_days=1)
 
         key = (dep, arr)
         flights = self.FLIGHT_DB.get(key)
@@ -53,11 +56,27 @@ class FlightTool(BaseTool):
                 # Generate generic flights
                 flights = self._generate_generic(dep, arr)
 
+        # 按日期生成稳定的伪随机价格（同一天多次查询结果一致，不同天价格浮动）
+        seed = hash((dep, arr, date)) & 0xFFFF
+        rng = random.Random(seed)
+
+        # 到达时刻处理跨天（"13:00+1"）
+        try:
+            base_day = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            base_day = datetime.now()
+
         result_flights = []
         for f in flights:
-            price = random.randint(f["price_range"][0], f["price_range"][1])
+            price = rng.randint(f["price_range"][0], f["price_range"][1])
+            arrive_label = f["arrive"]
+            arrive_date = date
+            if "+1" in f["arrive"]:
+                arrive_label = f["arrive"].replace("+1", "")
+                arrive_date = (base_day + timedelta(days=1)).strftime("%Y-%m-%d")
             result_flights.append({
-                "airline": f["airline"], "depart": f["depart"], "arrive": f["arrive"],
+                "airline": f["airline"], "depart": f["depart"], "arrive": arrive_label,
+                "depart_date": date, "arrive_date": arrive_date,
                 "duration": f["duration"], "price": price, "type": f["type"],
                 "aircraft": f.get("aircraft", "N/A"), "meal": f.get("meal", "N/A"),
                 "baggage": f.get("baggage", "N/A"), "wifi": f.get("wifi", "N/A"),
@@ -70,6 +89,7 @@ class FlightTool(BaseTool):
 
         return json.dumps({
             "departure": dep, "arrival": arr, "date": date,
+            "data_source": "模拟数据（未接入航班API）",
             "flights": result_flights, "count": len(result_flights),
             "cheapest": {"airline": result_flights[0]["airline"], "price": cheapest},
             "fastest": {"airline": fastest["airline"], "duration": fastest["duration"]},
