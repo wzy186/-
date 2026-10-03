@@ -32,39 +32,54 @@ TravelMate 是一个功能完整的 AI 出行助手，采用 **图编排 Agent �
 | **后端 API** | FastAPI | 可选 REST API 层，自动生成 OpenAPI 文档 |
 | **数据模型** | Pydantic v2 + SQLAlchemy | 类型安全 + ORM |
 
-## 核心架构
+## 核心架构（动态多 Agent：Plan-and-Execute）
 
 ```
-用户输入 → Streamlit UI → 多 Agent 编排图（Supervisor + 4 专家子图）
+用户输入 → Streamlit UI → 顶层编排图
                               │
                  ┌────────────┴──────────────────┐
                  │                               │
-          顶层通用节点                     Supervisor 调度 Agent
-          ├─ load_context（画像+RAG）      ├─ LLM 意图识别（JSON 任务单）
-          ├─ guardrail_input（护栏）       ├─ Mock 关键词路由（无 Key 兜底）
-          ├─ guardrail_output（护栏）      ├─ 复合意图拆分（最多 3 任务）
-          └─ finalize（多回答合并）         └─ 任务队列 + 顺序派发
-                                                 │
+          顶层通用节点                     Supervisor 调度 Agent（Planner）
+          ├─ load_context（画像+RAG）      ├─ LLM 生成分阶段执行计划 {"stages":[[...],...]}
+          ├─ guardrail_input（护栏）       ├─ 同阶段任务无依赖依次分发 / 依赖任务分阶段
+          ├─ guardrail_output（护栏）      ├─ Mock 关键词规划（无 Key 兜底）
+          └─ finalize（多回答按Agent分节合并）└─ 接收子 Agent 的 handoff 动态追加阶段
+                                                 │ 按计划派发
               ┌──────────────┬───────────────────┼──────────────────┐
               │              │                   │                  │
         route_agent     ticket_agent       travel_agent         qa_agent
         路线规划Agent    票务Agent           行程规划Agent        问答Agent
-        ├─ route        ├─ train(12306)    ├─ weather           ├─ RAG 检索
+        ├─ route        ├─ train           ├─ weather(高德实时)  ├─ RAG 检索
         ├─ nearby       ├─ flight          ├─ hotel             └─ 知识问答
         ├─ geocode      ├─ book_flight     ├─ attraction
         └─ district     └─ book_train_     ├─ budget/exchange/
-        (高德 MCP)         ticket(HITL)       translate
-                        (12306 MCP)        └─ book_hotel 等(HITL)
+        (高德 REST+MCP)    ticket(HITL)       translate
+                        (12306 MCP 真实余票) └─ book_hotel 等(HITL)
               │
    每个子 Agent = 独立 ReAct 子图（react_llm → parse_tools → react_exec 循环，
-   最多 3 轮；操作类工具触发 HITL 中断冒泡到顶层，确认后恢复）
+   最多 3 轮；可 [call:handoff] 把超职责请求动态移交回调度器；
+   操作类工具触发 HITL 中断冒泡到顶层，确认后恢复）
               │
    ┌──────────┴──────────────┐
    MCP 统一工具注册表          RAG 知识库 / 记忆系统
    ├─ 本地 12 查询 + 7 操作    ├─ TF-IDF + BM25
    └─ 外部 MCP Server 动态     └─ 10 城市 114 切片
-      注册（高德/12306…）
+      注册（高德 15 + 12306 8）
 ```
+
+### 动态多 Agent 机制
+
+- **Plan-and-Execute**：Supervisor 由 LLM 输出 `{"stages": [[任务,...], ...]}`，
+  阶段内任务无依赖，阶段间表达依赖（如"先查天气→再按天气做行程"自动排两阶段）
+- **handoff 动态移交**：子 Agent 执行中发现超出职责的子请求（如路线Agent遇到订票），
+  调用 `[call:handoff] {"agent":"ticket_agent","instruction":"..."}` 交回调度器，
+  运行时追加执行阶段，无需重启或预注册
+- **状态增量合并**：多分支各自在状态克隆（`AgentState.clone`，容器级浅拷贝）上执行，
+  完成后按 fork 点只合并增量（thinking/tool_results/trace/replies 等），
+  杜绝继承数据翻倍
+- **多格式工具调用解析**：兼容 `[call:tool] {json}` 约定格式、DeepSeek DSML 原生标记、
+  通用 `<invoke>`/`<function>` 标记
+- **诚实标注**：未接真实数据源的工具结果带 `data_source` 字段，Agent 回答时告知用户
 
 ### 外部 MCP Server 接入
 
@@ -89,9 +104,9 @@ TravelMate/
 ├── app.py                        # Streamlit 主界面（登录/侧边栏/22页面路由）
 ├── core/                         # Agent 核心引擎
 │   ├── agent.py                  # 多 Agent 编排入口（process/resume，兼容旧接口）
-│   ├── graph.py                  # StateGraph 引擎（节点/条件路由/子图嵌入/中断恢复）
+│   ├── graph.py                  # StateGraph 引擎（节点/条件路由/子图嵌入/fan-out分发/增量合并/中断恢复）
 │   ├── agents/                   # 多 Agent 编排层
-│   │   ├── supervisor.py         # 调度 Agent（LLM 意图识别 + 关键词兜底 + 任务拆分）
+│   │   ├── supervisor.py         # Supervisor：Plan-and-Execute 分阶段调度 + handoff 接收
 │   │   ├── base_nodes.py         # 专家子 Agent 工厂（可配置 ReAct 子图）
 │   │   ├── configs.py            # 4 个专家 Agent 配置（路线/票务/行程/问答）
 │   │   └── nodes.py              # 顶层通用节点（上下文/护栏/收尾）
@@ -104,9 +119,9 @@ TravelMate/
 │   └── rag.py                    # RAG 引擎（TF-IDF + BM25，10城市114切片）
 ├── tools/                        # 工具层
 │   ├── base.py                   # 工具基类
-│   ├── weather.py                # 天气查询（7日预报 + 穿衣 + 健康提示）
+│   ├── weather.py                # 天气查询（国内走高德实时，海外降级 Mock 并标注来源）
 │   ├── flight.py                 # 航班查询（多航司比价 + 机型/餐食/WiFi）
-│   ├── train.py                  # 火车票查询（12306 Mock，MCP 优先）
+│   ├── train.py                  # 火车票查询（本地 Mock；12306 MCP 已接入时 Agent 优先用真实余票）
 │   ├── hotel.py                  # 酒店推荐（星级/评分/设施/区域指南）
 │   ├── exchange.py               # 汇率换算（12种货币）
 │   ├── translate.py              # 多语言翻译（8种语言）
