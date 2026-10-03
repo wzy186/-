@@ -1,7 +1,14 @@
 import json
+import os
 import random
 from datetime import datetime, timedelta
+
+import httpx
+from dotenv import load_dotenv
+
 from tools.base import BaseTool
+
+load_dotenv()
 
 
 class WeatherTool(BaseTool):
@@ -34,6 +41,13 @@ class WeatherTool(BaseTool):
     def run(self, args: dict) -> str:
         city = args.get("city", args.get("destination", "东京"))
         days = min(int(args.get("days", 7)), 7)
+
+        # 优先：高德实时天气（覆盖中国城市，未来最多4天）
+        real = self._amap_weather(city, days)
+        if real:
+            return real
+
+        # 降级：海外城市或API失败 → 模拟数据（诚实标注来源）
         db = self.WEATHER_DB.get(city, {"base_temp": 22 + random.randint(0, 10), "base_humidity": 60, "base_uv": 5, "condition_pool": ["多云", "晴"], "rain_prob": 0.3})
 
         forecast = []
@@ -72,8 +86,91 @@ class WeatherTool(BaseTool):
             "clothing": clothing,
             "suggestion": self._suggestion(city, today),
             "health_tips": self._health_tips(today, city),
+            "data_source": "模拟数据（海外城市高德天气不覆盖）",
         }
         return json.dumps(result, ensure_ascii=False)
+
+    # ── 真实天气（高德 v3/weather，仅中国城市）──
+
+    def _amap_weather(self, city: str, days: int):
+        """国内城市返回结构化实时天气 JSON 字符串，失败/海外城市返回 None。"""
+        key = os.getenv("AMAP_API_KEY", "")
+        if not key or not city:
+            return None
+        try:
+            # 1. 城市 → adcode
+            geo = httpx.get("https://restapi.amap.com/v3/geocode/geo",
+                            params={"key": key, "address": city}, timeout=8).json()
+            geocodes = geo.get("geocodes") or []
+            if geo.get("status") != "1" or not geocodes:
+                return None
+            g0 = geocodes[0]
+            # 地名校验：防止"东京"被解析到"广西平南县东京村"之类的国内重名地名
+            regions = " ".join(str(g0.get(k) or "") for k in ("province", "city", "district"))
+            if city not in regions:
+                return None
+            adcode = geocodes[0].get("adcode", "")
+            if not adcode or not adcode.isdigit():
+                return None  # 海外城市无 adcode
+            # 2. 天气预报（extensions=all 返回今起3-4天）
+            w = httpx.get("https://restapi.amap.com/v3/weather/weatherInfo",
+                          params={"key": key, "city": adcode, "extensions": "all"}, timeout=8).json()
+            casts = (w.get("forecasts") or [{}])[0].get("casts") or []
+            if w.get("status") != "1" or not casts:
+                return None
+
+            forecast = []
+            for c in casts[:max(days, 1)]:
+                date_obj = datetime.strptime(c["date"], "%Y-%m-%d")
+                condition = c.get("dayweather", "未知")
+                if c.get("nightweather") and c["nightweather"] != c.get("dayweather"):
+                    condition += f"转{c['nightweather']}"
+                forecast.append({
+                    "date": date_obj.strftime("%m/%d"),
+                    "date_full": c["date"],
+                    "weekday": "周" + "一二三四五六日"[date_obj.weekday()],
+                    "temp_high": f"{c['daytemp']}°C", "temp_low": f"{c['nighttemp']}°C",
+                    "condition": condition,
+                    "wind": f"{c.get('daywind', '')}风{c.get('daypower', '')}",
+                })
+
+            avg_temp = (int(casts[0]["daytemp"]) + int(casts[0]["nighttemp"])) // 2
+            for low_t, high_t in self.CLOTHING_ADVICE:
+                if low_t <= avg_temp < high_t:
+                    clothing = self.CLOTHING_ADVICE[(low_t, high_t)]
+                    break
+            else:
+                clothing = self.CLOTHING_ADVICE[(28, 35)]
+
+            today = forecast[0]
+            return json.dumps({
+                "city": city, "forecast": forecast,
+                "today": today,
+                "clothing": clothing,
+                "suggestion": "数据来自高德天气，出发前建议再次确认临近预报。",
+                "health_tips": self._health_tips_amap(today),
+                "data_source": "高德天气（实时）",
+                "message": f"高德天气：{city}今日{today['condition']}，{today['temp_low']}~{today['temp_high']}",
+            }, ensure_ascii=False)
+        except Exception:
+            return None
+
+    def _health_tips_amap(self, today):
+        tips = []
+        high = int(today.get("temp_high", "25").replace("°C", ""))
+        low = int(today.get("temp_low", "15").replace("°C", ""))
+        condition = today.get("condition", "")
+        if high >= 35:
+            tips.append("高温预警，注意补水防中暑，避免正午户外活动")
+        if low <= 5:
+            tips.append("低温预警，注意保暖防感冒，室内外温差大")
+        if "雨" in condition:
+            tips.append("有降雨，随身带伞，建议室内活动备选方案")
+        if "雪" in condition:
+            tips.append("有降雪，注意防滑保暖，预留更多交通时间")
+        if not tips:
+            tips.append("天气适宜出行，享受旅途！")
+        return tips
 
     def _uv_label(self, uv):
         if uv <= 2: return "弱"
