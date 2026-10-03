@@ -56,6 +56,9 @@ def build_orchestrator() -> CompiledGraph:
         "ticket_agent": "ticket_agent",
         "travel_agent": "travel_agent",
         "qa_agent": "qa_agent",
+        # Plan-and-Execute：阶段推进与收尾
+        "supervisor": "supervisor",
+        "guardrail_output": "guardrail_output",
     })
     g.add_edge("guardrail_output", "finalize")
     return g.compile()

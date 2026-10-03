@@ -109,10 +109,13 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
         iters = state.metadata.get(f"__iter_{cfg.name}", 0)
         state.metadata[f"__iter_{cfg.name}"] = iters + 1
 
-        # 首轮进入：从调度队列领取任务
+        # 首轮进入：领取调度任务（并行模式按 agent 名领取，串行模式从队列弹出）
         if iters == 0:
             from core.agents.supervisor import pop_task
-            state.metadata["current_task"] = pop_task(state)
+            stage_tasks = state.metadata.get("stage_tasks") or {}
+            my_task = stage_tasks.pop(cfg.name, None)
+            task = my_task or pop_task(state)
+            state.metadata["current_task"] = task
             state.metadata["current_agent"] = cfg.label
             state.thinking.append(f"[进入子Agent] {cfg.label}")
 
@@ -125,7 +128,10 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
                 "规则：\n1. 需要数据时先调用查询工具；2. 拿到结果后综合成完整回答，"
                 "不要把工具调用语法留在最终回复里；3. 用户表达操作意图（预订等）时直接调用操作工具。\n"
                 "4. 工具调用只允许使用 [call:toolName] {json} 这一种格式，"
-                "严禁使用 XML 标签、函数调用标记或其他任何格式。"
+                "严禁使用 XML 标签、函数调用标记或其他任何格式。\n"
+                "5. 若执行中发现需要其他专家处理的子请求（如路线Agent遇到订票需求），"
+                "调用 [call:handoff] {\"agent\": \"目标专家名\", \"instruction\": \"子请求\"} 移交，"
+                "然后继续完成自己的部分。可选目标: route_agent/ticket_agent/travel_agent/qa_agent。"
             )
 
         task = state.metadata.get("current_task") or {}
@@ -174,6 +180,18 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
         pending = []
         for tc in state.tool_calls:
             name, args = tc["tool"], tc["args"]
+            # Agent 间动态移交：发现超出职责的子请求，交回调度器追加执行阶段
+            if name == "handoff":
+                from core.agents.supervisor import VALID_AGENTS
+                target = (args or {}).get("agent", "")
+                if target in VALID_AGENTS:
+                    handoff_task = {"agent": target,
+                                    "instruction": (args or {}).get("instruction") or state.user_input}
+                    state.metadata.setdefault("handoffs", []).append(handoff_task)
+                    state.thinking.append(f"[{cfg.label}] ⤴️ 移交给 {target}：{handoff_task['instruction'][:60]}")
+                else:
+                    state.thinking.append(f"[{cfg.label}] ⚠️ 无效移交目标: {target}")
+                continue
             if not tool_allowed(cfg, name):
                 state.thinking.append(f"[{cfg.label}] ⚠️ 工具 {name} 不属于本 Agent，已跳过")
                 continue
