@@ -1,7 +1,11 @@
 import os
 import json
 import httpx
+from dotenv import load_dotenv
 from tools.base import BaseTool
+
+# 确保在 core.llm 之前被导入时也能读到 .env
+load_dotenv()
 
 
 class AmapTool(BaseTool):
@@ -44,7 +48,10 @@ class AmapTool(BaseTool):
     # ── Real API calls ──
 
     def _resolve_location(self, value: str, fallback_hint: str = "") -> str:
-        """地名 → 坐标（"lon,lat"）。已是坐标直接返回；否则调地理编码解析。"""
+        """地名 → 坐标（"lon,lat"）。
+
+        解析顺序：已是坐标 → 地理编码API（结构化地址）→ POI搜索API（车站/地标等）。
+        """
         value = (value or "").strip()
         if not value:
             value = fallback_hint
@@ -53,11 +60,26 @@ class AmapTool(BaseTool):
         import re
         if re.match(r"^-?\d+\.?\d*\s*,\s*-?\d+\.?\d*$", value):
             return value.replace(" ", "")
-        result = json.loads(self._geocode({"address": value}))
-        geocodes = (result or {}).get("geocodes") or []
-        if not geocodes:
-            raise ValueError(f"无法解析地点坐标: {value}（可尝试加上城市名，如'北京市中关村'）")
-        return geocodes[0]["location"]
+        # 1) 地理编码（地址）
+        try:
+            result = json.loads(self._geocode({"address": value}))
+            for g in (result or {}).get("geocodes") or []:
+                if g.get("location"):
+                    return g["location"]
+        except Exception:
+            pass
+        # 2) POI 关键字搜索（车站/地标/景点）
+        loc = self._search_poi(value)
+        if loc:
+            return loc
+        raise ValueError(f"无法解析地点坐标: {value}（可尝试加上城市名，如'北京市中关村'）")
+
+    def _search_poi(self, keywords: str) -> str:
+        url = "https://restapi.amap.com/v3/place/text"
+        params = {"key": self.key, "keywords": keywords, "offset": 1, "page": 1}
+        r = httpx.get(url, params=params, timeout=10)
+        pois = (r.json() or {}).get("pois") or []
+        return pois[0].get("location", "") if pois else ""
 
     def _route(self, args: dict) -> str:
         # 支持地名或坐标：origin_name/destination_name 优先，其次 origin/destination

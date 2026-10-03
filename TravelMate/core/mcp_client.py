@@ -35,8 +35,12 @@ import time
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 from core.mcp import ToolSchema, register_tool
+
+# MCP_<NAME>_* 环境变量可能配置在 .env 中；在发现 server 前先加载
+load_dotenv()
 
 _PROTOCOL_VERSION = "2024-11-05"
 _DEFAULT_CALL_TIMEOUT = 25.0
