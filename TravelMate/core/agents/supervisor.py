@@ -40,7 +40,24 @@ SUPERVISOR_PROMPT = """你是 TravelMate 多 Agent 系统的调度中心（Super
 3. instruction 必须自包含：补全目的地/日期/人数等从上下文推断的信息
 4. 与旅行无关的闲聊/常识问题 → 单阶段单任务 qa_agent
 5. 简单请求只给 1 个阶段 1 个任务，不要过度拆分
+
+## 硬性规则（必须遵守）
+- **凡是需要实时/动态数据的请求，绝对禁止派给 qa_agent**——它没有工具：
+  天气（含对比/适合出行吗）、余票/票价、路线/距离、价格、汇率 → 派给对应工具型 Agent
+- 天气查询/对比/穿衣建议 → travel_agent；"A和B哪个天气好"这类对比也是 travel_agent
+- 示例：
+  - "北京和东京哪边现在更热" → travel_agent（instruction: 查询北京和东京当前天气并对比温度）
+  - "明天下雨吗" → travel_agent
+  - "日本签证需要什么材料" → qa_agent（纯知识，无需实时数据）
 """
+
+
+_REALTIME_KW = ["天气", "气温", "温度", "下雨", "降雨", "热不热", "冷不冷", "余票", "票价",
+                "路线", "怎么走", "导航", "汇率", "多少公里", "多远", "价格", "比价"]
+
+
+def _has_realtime_intent(text: str) -> bool:
+    return any(k in text for k in _REALTIME_KW)
 
 
 def _plan_by_keywords(text: str) -> list[list[dict]]:
@@ -99,6 +116,10 @@ def node_supervisor(state: AgentState) -> AgentState:
             prompt += f"\n（用户画像：{profile_hint.strip()}）"
         result = chat_json(prompt, system=SUPERVISOR_PROMPT, intent="")
         stages = _validate_plan(result, text)
+        # 安全网：实时数据请求不允许只派 qa_agent（LLM 误判时强制走关键词规划）
+        if stages and all(t["agent"] == "qa_agent" for stage in stages for t in stage):
+            if _has_realtime_intent(text):
+                stages = []
     if not stages:
         stages = _plan_by_keywords(text)
 
