@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from core.graph import AgentState
 from core.llm import chat_json, is_llm_available
@@ -48,16 +49,21 @@ SUPERVISOR_PROMPT = """你是 TravelMate 多 Agent 系统的调度中心（Super
 - 示例：
   - "北京和东京哪边现在更热" → travel_agent（instruction: 查询北京和东京当前天气并对比温度）
   - "明天下雨吗" → travel_agent
+  - "从北京站到北京西站怎么过去" → route_agent（instruction: 规划从北京站到北京西站的路线）
+  - "A到B怎么过去/怎么到/如何前往" → route_agent
   - "日本签证需要什么材料" → qa_agent（纯知识，无需实时数据）
 """
 
 
 _REALTIME_KW = ["天气", "气温", "温度", "下雨", "降雨", "热不热", "冷不冷", "余票", "票价",
-                "路线", "怎么走", "导航", "汇率", "多少公里", "多远", "价格", "比价"]
+                "路线", "怎么走", "导航", "汇率", "多少公里", "多远", "价格", "比价",
+                "地铁", "公交", "驾车", "打车", "步行去"]
+# 交通方式问法正则：怎么过去/怎么到/如何前往/坐地铁 等
+_ROUTE_PAT = re.compile(r"怎么(过去|走|去|到|前往|到达)|如何(去|前往|到达)|(坐|乘|搭).{0,6}(地铁|公交|车)|最近的路")
 
 
 def _has_realtime_intent(text: str) -> bool:
-    return any(k in text for k in _REALTIME_KW)
+    return any(k in text for k in _REALTIME_KW) or bool(_ROUTE_PAT.search(text))
 
 
 def _plan_by_keywords(text: str) -> list[list[dict]]:
@@ -72,7 +78,7 @@ def _plan_by_keywords(text: str) -> list[list[dict]]:
     stage: list[dict] = []
     if any(k in text for k in ticket_kw):
         stage.append({"agent": "ticket_agent", "instruction": text})
-    if any(k in text for k in route_kw):
+    if any(k in text for k in route_kw) or _ROUTE_PAT.search(text):
         stage.append({"agent": "route_agent", "instruction": text})
     if not stage and any(k in text for k in travel_kw):
         stage.append({"agent": "travel_agent", "instruction": text})

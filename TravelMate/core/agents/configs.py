@@ -49,13 +49,22 @@ def _route_mock(state, instruction: str, iters: int) -> str:
                 kw = k
                 break
         return f'[call:nearby] {{"location_name":"目的地","keywords":"{kw}","radius":3000}}'
-    if any(k in text for k in ["路线", "怎么走", "怎么去", "导航", "多远", "驾车", "公交", "地铁", "步行", "骑行"]):
+    import re
+    if any(k in text for k in ["路线", "怎么走", "怎么去", "导航", "多远", "驾车", "公交", "地铁", "步行", "骑行"]) \
+            or re.search(r"怎么(过去|走|去|到|前往|到达)|如何(去|前往|到达)", instruction):
         mode = "驾车"
         for m in [("公交", "公交"), ("地铁", "公交"), ("步行", "步行"), ("骑行", "骑行"), ("驾车", "驾车")]:
             if m[0] in text:
                 mode = m[1]
                 break
-        return f'[call:route] {{"origin_name":"出发点","destination_name":"目的地","mode":"{mode}"}}'
+        # 提取 "从A到B" 的起终点
+        import re
+        origin, dest = "出发点", "目的地"
+        m = re.search(r"从(.{1,12}?)到(.{1,12}?)[，,。\s]|从(.{1,12}?)到(.{1,12})$", instruction)
+        if m:
+            origin = (m.group(1) or m.group(3) or origin).strip()
+            dest = (m.group(2) or m.group(4) or dest).strip()
+        return f'[call:route] {{"origin_name":"{origin}","destination_name":"{dest}","mode":"{mode}"}}'
     return '[call:geocode] {"address":"目的地"}'
 
 
