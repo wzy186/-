@@ -75,6 +75,7 @@ class SpecialistConfig:
     max_iter: int = 3               # ReAct 最大轮数
     mock: callable = None           # Mock 模式处理器 (state, instruction, iters) -> str
     mock_intent: str = ""           # 无 LLM 时 chat() 的 intent 提示
+    ensure_action: callable = None  # 确定性动作兜底 (state) -> bool：意图明确但LLM未发起操作时自动构造
 
 
 def tool_allowed(cfg: SpecialistConfig, tool_name: str) -> bool:
@@ -227,6 +228,9 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
 
     def agent_format(state: AgentState) -> AgentState:
         """整理本 Agent 的最终回答；回复过短时用工具结果拼装。"""
+        # 确定性动作兜底：用户意图明确但 LLM 只说不做 → 直接构造操作进 HITL 确认框
+        if cfg.ensure_action and cfg.ensure_action(state):
+            return state
         reply = (state.reply or "").strip()
         if len(reply) < 10 and state.tool_results:
             parts = []

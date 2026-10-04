@@ -76,7 +76,7 @@ TICKET_AGENT_PROMPT = """你是 TravelMate 的票务专家（票务Agent），�
 - 预订：采用**推荐制**——查询后直接推荐最优车次/航班（优先有票且最快，其次最便宜），
   立即调用 book_train_ticket / book_flight 发起预订，让用户在确认环节定夺
 - **禁止询问乘客姓名/座位**：不要输出"请提供乘客姓名""请确认以下信息，我立即为您预订"这类
-  追问话术。乘客未提供时用画像姓名或"待补充"。预订由你直接发起，措辞用
+  追问话术。乘客未提供时默认使用用户画像/登录名（不要虚构"张三"等示例名）。预订由你直接发起，措辞用
   "已为您推荐并锁定 G3 一等座，请在下方确认框中核对信息"，确认与否由用户点按钮决定
 - 确认后按工具返回的消息输出预订结果。
 
@@ -231,6 +231,64 @@ def _qa_mock(state, instruction: str, iters: int) -> str:
 
 # ────────────────────────── 汇总 ──────────────────────────
 
+
+
+def _ticket_ensure_action(state) -> bool:
+    """预订意图明确但 LLM 未发起预订时，从查询结果自动构造预订动作（保证确认框出现）。"""
+    task = state.metadata.get("current_task") or {}
+    text = (task.get("instruction") or state.user_input or "")
+    if not any(k in text for k in ("订", "买票", "book", "购票")):
+        return False
+    if state.pending_actions or state.actions:
+        return False
+    # 从最近的查询结果中取车次（本地 JSON 格式 / 12306 MCP 文本格式）
+    import re as _re
+    for tr in reversed(state.tool_results):
+        data = tr.get("result") or {}
+        trains = data.get("trains") or []
+        if not trains:
+            # 12306 MCP 返回文本表格 → 正则解析车次/时刻
+            raw = str(data.get("raw") or data.get("message") or "")
+            m = _re.search(r"([GDCK]\d{1,4}).{0,40}?(\d{1,2}:\d{2})\s*->\s*(\d{1,2}:\d{2})", raw)
+            if m:
+                dm = _re.search(r"(\d{4}-\d{2}-\d{2})", raw)
+                trains = [{"train_no": m.group(1), "depart_time": m.group(2),
+                           "arrive_time": m.group(3), "price": {"二等座": 0}, "seats": {}}]
+                data = {**data, "from_station": data.get("from_station", ""),
+                        "to_station": data.get("to_station", ""),
+                        "date": dm.group(1) if dm else data.get("date", "")}
+        if not trains:
+            continue
+        pick, seat = None, ""
+        for t in trains:
+            seats = t.get("seats", {})
+            available = [s for s, n in seats.items() if n in ("有", "充足")]
+            if available:
+                pick, seat = t, ("二等座" if "二等座" in available else available[0])
+                break
+        if not pick:
+            pick, seat = trains[0], next(iter(trains[0].get("price", {})), "二等座")
+        args = {
+            "train_no": pick.get("train_no", ""),
+            "from_station": data.get("from_station", ""), "to_station": data.get("to_station", ""),
+            "date": data.get("date", ""), "seat_type": seat,
+            "passenger": "", "price": pick.get("price", {}).get(seat, 0),
+            "depart_time": pick.get("depart_time", ""), "arrive_time": pick.get("arrive_time", ""),
+        }
+        state.pending_actions = [{"tool": "book_train_ticket", "args": args, "agent": "ticket_agent"}]
+        state.needs_confirmation = True
+        state.interrupted = True
+        state.interrupt_data = {
+            "type": "action_confirmation", "actions": state.pending_actions,
+            "message": (f"⚠️ 票务Agent为您锁定 {args['train_no']} {args['from_station']}→{args['to_station']}"
+                        f" {args['date']} {seat}，请确认是否预订："),
+        }
+        state.metadata["resume_node"] = "guardrail_output"
+        state.thinking.append(f"[票务Agent] 自动构造预订请求 {args['train_no']}（等待用户确认）")
+        return True
+    return False
+
+
 SPECIALISTS: dict[str, SpecialistConfig] = {
     "route_agent": SpecialistConfig(
         name="route_agent", label="路线规划Agent",
@@ -245,6 +303,7 @@ SPECIALISTS: dict[str, SpecialistConfig] = {
         tools={"train", "flight", "book_train_ticket", "book_flight"},
         remote_prefixes=("mcp_12306",),
         mock=_ticket_mock, mock_intent="ticket",
+        ensure_action=_ticket_ensure_action,
     ),
     "travel_agent": SpecialistConfig(
         name="travel_agent", label="行程规划Agent",
