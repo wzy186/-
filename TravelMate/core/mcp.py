@@ -221,7 +221,8 @@ def _init_registry():
                 try:
                     from utils.storage import get_current_user
                     from core.memory import get_profile
-                    args["passenger"] = (get_profile() or {}).get("name") or "待补充"
+                    args["passenger"] = ((get_profile() or {}).get("name")
+                                          or get_current_user() or "待补充")
                 except Exception:
                     args["passenger"] = "待补充"
             booking_id = add_booking({

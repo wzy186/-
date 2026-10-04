@@ -91,6 +91,10 @@ def _validate_plan(result: dict, fallback_text: str) -> list[list[dict]]:
     """校验 LLM 计划：agent 名合法、阶段数/任务数截断。"""
     stages: list[list[dict]] = []
     for stage in (result.get("stages") or [])[:3]:
+        if isinstance(stage, dict):
+            stage = [stage]  # LLM 偶尔把单任务阶段输出成对象而非列表
+        if not isinstance(stage, list):
+            continue
         tasks = []
         for t in (stage or [])[:2]:
             if isinstance(t, dict) and t.get("agent") in VALID_AGENTS:
