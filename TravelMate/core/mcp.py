@@ -216,6 +216,14 @@ def _init_registry():
             return json.dumps({"success": True, "message": "✅ 已保存备注"}, ensure_ascii=False), True
 
         if name == "book_train_ticket":
+            # 乘客缺省：优先用户画像姓名，否则占位（用户确认时可见可改）
+            if not args.get("passenger") or args.get("passenger") == "待补充":
+                try:
+                    from utils.storage import get_current_user
+                    from core.memory import get_profile
+                    args["passenger"] = (get_profile() or {}).get("name") or "待补充"
+                except Exception:
+                    args["passenger"] = "待补充"
             booking_id = add_booking({
                 "type": "train", "name": f"{args.get('train_no','')} {args.get('from_station','')}→{args.get('to_station','')}",
                 "train_no": args.get("train_no", ""), "route": f"{args.get('from_station','')}→{args.get('to_station','')}",

@@ -64,9 +64,11 @@ def _route_mock(state, instruction: str, iters: int) -> str:
 TICKET_AGENT_PROMPT = """你是 TravelMate 的票务专家（票务Agent），负责火车票与机票：
 - 火车票：通过 train 工具查询 12306 余票/票价/历时（若 12306 MCP 已接入会自动提供 mcp_12306_* 工具，优先使用）
 - 机票：通过 flight 工具查询多航司比价
-- 预订：确认车次/航班与乘客信息后，调用 book_train_ticket / book_flight 执行预订
-- 预订缺少乘客姓名或日期时，先追问再调用操作工具
-- 结果要具体：车次/航班号、时刻、座位类型、价格。
+- 预订：采用**推荐制**——查询后直接推荐最优车次/航班（优先有票且最快，其次最便宜），
+  立即调用 book_train_ticket / book_flight 发起预订，让用户在确认环节定夺
+- **禁止追问乘客姓名**：乘客未提供时用用户画像中的姓名，画像也没有就填"待补充"，
+  用户可在确认框里看到完整信息后再决定
+- 确认后按工具返回的消息输出预订结果。
 
 回答要求：以表格或列表呈现可选车次/航班，标注推荐项（最快/最便宜）。"""
 
@@ -74,9 +76,34 @@ TICKET_AGENT_PROMPT = """你是 TravelMate 的票务专家（票务Agent），�
 def _ticket_mock(state, instruction: str, iters: int) -> str:
     if iters > 0:
         text = _summarize_results(state)
-        if text:
-            return text + "\n\n如需预订，请告诉我乘客姓名，我会为您执行预订（需确认）。"
-        return "已完成票务查询。"
+        # 有预订意图 → 直接推荐最优车次发起预订（HITL 确认兜底）
+        if any(k in instruction.lower() for k in ["订", "买", "book"]) and state.tool_results:
+            trains = []
+            for tr in state.tool_results:
+                data = tr.get("result", {})
+                trains = data.get("trains") or []
+                if trains:
+                    break
+            if trains:
+                # 推荐优先级：二等座有票 → 最快
+                pick = None
+                for t in trains:
+                    seats = t.get("seats", {})
+                    if "二等座" in seats and seats["二等座"] in ("有", "充足"):
+                        pick = t
+                        break
+                pick = pick or trains[0]
+                profile = get_profile()
+                passenger = (profile or {}).get("name") or "待补充"
+                price = pick.get("price", {}).get("二等座", 0)
+                return (f'[call:book_train_ticket] {{"train_no":"{pick["train_no"]}",'
+                        f'"from_station":"{state.tool_results[0]["result"].get("from_station", "出发站")}",'
+                        f'"to_station":"{state.tool_results[0]["result"].get("to_station", "到达站")}",'
+                        f'"date":"{state.tool_results[0]["result"].get("date", "")}",'
+                        f'"seat_type":"二等座","passenger":"{passenger}","price":{price},'
+                        f'"depart_time":"{pick.get("depart_time", "")}","arrive_time":"{pick.get("arrive_time", "")}"}}'
+                        f"\n\n已为您选定推荐车次 **{pick['train_no']}**（二等座 ¥{price}），请在确认框中核对信息。")
+        return text or "已完成票务查询。"
     text = instruction.lower()
     # 提取城市与日期
     cities = ["北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "重庆", "武汉", "西安",
