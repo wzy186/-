@@ -217,9 +217,3 @@ ab -n 3000 -c 100 http://localhost:8081/shop/1
 
 Go 版：`config.yaml`（`DEEPSEEK_API_KEY` 环境变量注入 AI key，`config.local.yaml` 为本地覆盖示例，已 gitignore）。
 
-## 已知局限（演示项目刻意保留）
-
-- 红包退款定时器：Java `ScheduledExecutor` / Go goroutine，进程重启任务丢失；生产应换 Redisson DelayedQueue 或 Redis ZSet 延迟队列
-- Go 版分布式锁为 SetNX 简易实现（无续期/可重入），生产建议 Redisson 或 redsync
-- 无监控告警、无 Redis 集群/哨兵
-- 前端部分页面有演示用硬编码 ID（如默认商铺 7、券 10）
