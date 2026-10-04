@@ -385,7 +385,7 @@ def _mock(intent: str, prompt: str = "") -> str:
         for city in ["东京","巴黎","曼谷","首尔","伦敦","纽约","悉尼","迪拜","罗马","巴厘岛"]:
             if city in prompt:
                 arr = city; break
-        passenger = "张三"
+        passenger = (get_profile() or {}).get("name") or "待补充"
         for m in re.finditer(r'乘客[是为：:\s]*(\S+)', prompt):
             passenger = m.group(1)
         date = ""
@@ -401,7 +401,7 @@ def _mock(intent: str, prompt: str = "") -> str:
         dest = "东京"
         for city in ["东京","巴黎","曼谷","首尔","伦敦","纽约","悉尼","迪拜","罗马","巴厘岛"]:
             if city in prompt: dest = city; break
-        guest = get_profile().get("name", "张三") if get_profile() else "张三"
+        guest = (get_profile() or {}).get("name") or "待补充"
         return f'[call:hotel] {{"destination":"{dest}","budget_per_night":800,"style":"舒适"}}\n\n根据查询结果，为您推荐并预订：\n\n[call:book_hotel] {{"name":"新宿格兰贝尔酒店","city":"{dest}","check_in":"待确认","check_out":"待确认","guest":"{guest}","room_type":"标准间","price_per_night":600,"nights":1,"guests":1}}\n\n✅ 酒店预订成功！新宿格兰贝尔酒店 | 标准间 | ¥600/晚'
 
     if "加入行程" in lower_prompt or "添加景点" in lower_prompt or "add_spot" in lower_prompt or ("加" in lower_prompt and "行程" in lower_prompt):

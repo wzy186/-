@@ -189,7 +189,7 @@ def _travel_mock(state, instruction: str, iters: int) -> str:
         city = m.group(1) if m else "东京"
         return f'[call:weather] {{"destination":"{city}","days":7}}'
     if "酒店" in text and ("订" in text or "推荐" in text or "预订" in text):
-        guest = get_profile().get("name", "张三") if get_profile() else "张三"
+        guest = (get_profile() or {}).get("name") or "待补充"
         return (f'[call:hotel] {{"destination":"目的地","budget_per_night":800,"style":"舒适"}}'
                 f"\n\n[call:book_hotel] {{\"name\":\"推荐酒店\",\"city\":\"目的地\",\"check_in\":\"待确认\","
                 f"\"check_out\":\"待确认\",\"guest\":\"{guest}\",\"room_type\":\"标准间\",\"price_per_night\":600,"

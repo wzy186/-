@@ -129,6 +129,24 @@ def _train_options_text(state, exclude_train_no: str = "") -> str:
     return ""
 
 
+_BAD_PASSENGER = (None, "", "张三", "待补充", "待定", "示例")
+
+
+def _sanitize_passenger(tool: str, args: dict):
+    """乘客/入住人净化：LLM 传来的空值或示例名（如"张三"）一律覆盖为用户画像姓名。"""
+    key = {"book_train_ticket": "passenger", "book_flight": "passenger",
+           "book_hotel": "guest"}.get(tool)
+    if not key:
+        return
+    try:
+        from core.memory import get_profile
+        default = (get_profile() or {}).get("name") or "待补充"
+    except Exception:
+        default = "待补充"
+    if args.get(key) in _BAD_PASSENGER:
+        args[key] = default
+
+
 def _format_action_line(a: dict) -> str:
     """把待确认操作格式化成人类可读的核对信息。"""
     import json as _json
@@ -249,6 +267,7 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
             state.thinking.append(f"[{cfg.label}] 调用工具 {name}({json.dumps(args, ensure_ascii=False)[:80]})")
             schema = get_tool_schema(name)
             if schema and schema.category == "action":
+                _sanitize_passenger(name, args)  # LLM 填的"张三"等示例名 → 用户画像姓名
                 # HITL：操作类工具先挂起，等用户确认
                 pending.append({"tool": name, "args": args, "agent": cfg.name})
             else:
