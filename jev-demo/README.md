@@ -146,7 +146,5 @@ test/             34 个单测：条件匹配、8 条路由规则、拦截分级
 - 拦截只作用在沙盘输入框，真接客服工作台要挂在发送按钮的前置钩子上
 - ⚠️ API Key 只存 `.env`（服务端），**不要提交到仓库**，`.gitignore` 应包含 `.env`
 
-## 致谢
 
-- 原项目：[kiler398/jev-demo](https://github.com/kiler398/jev-demo)
 - 模型与 API：[TypeSafe AI](https://typesafe.ai)（Jev / System One）
