@@ -243,20 +243,35 @@ def _ticket_ensure_action(state) -> bool:
         return False
     # 从最近的查询结果中取车次（本地 JSON 格式 / 12306 MCP 文本格式）
     import re as _re
+    # 文本行示例：G531 北京西(telecode:VNP) -> 深圳北(telecode:IOQ) 08:00 -> 16:00 历时：8小时
+    _ROW = _re.compile(r"([GDCK]\d{1,4})\s+([^\s|(]+)(?:\([^)]*\))?\s*->\s*([^\s|(]+)(?:\([^)]*\))?\s*"
+                       r"(\d{1,2}:\d{2})\s*->\s*(\d{1,2}:\d{2})")
+
     for tr in reversed(state.tool_results):
         data = tr.get("result") or {}
         trains = data.get("trains") or []
         if not trains:
-            # 12306 MCP 返回文本表格 → 正则解析车次/时刻
+            # 12306 MCP 返回文本表格 → 逐行解析：车次/出发站/到达站/时刻/价格
             raw = str(data.get("raw") or data.get("message") or "")
-            m = _re.search(r"([GDCK]\d{1,4}).{0,40}?(\d{1,2}:\d{2})\s*->\s*(\d{1,2}:\d{2})", raw)
-            if m:
-                dm = _re.search(r"(\d{4}-\d{2}-\d{2})", raw)
-                trains = [{"train_no": m.group(1), "depart_time": m.group(2),
-                           "arrive_time": m.group(3), "price": {"二等座": 0}, "seats": {}}]
-                data = {**data, "from_station": data.get("from_station", ""),
-                        "to_station": data.get("to_station", ""),
-                        "date": dm.group(1) if dm else data.get("date", "")}
+            dm = _re.search(r"(\d{4}-\d{2}-\d{2})", raw)
+            trains = []
+            for m in _ROW.finditer(raw):
+                seg = raw[m.end():m.end() + 260]
+                prices = {}
+                for seat_name in ("商务座", "一等座", "二等座", "硬卧", "硬座"):
+                    pm = _re.search(seat_name + r"[^0-9¥]{0,8}¥?(\d+(?:\.\d+)?)", seg)
+                    if pm:
+                        prices[seat_name] = float(pm.group(1))
+                trains.append({
+                    "train_no": m.group(1), "depart_time": m.group(4), "arrive_time": m.group(5),
+                    "price": prices or {"二等座": 0}, "seats": {},
+                    "_from": m.group(2), "_to": m.group(3),
+                })
+            if trains:
+                data = {**data,
+                        "from_station": trains[0].get("_from", data.get("from_station", "")),
+                        "to_station": trains[0].get("_to", data.get("to_station", "")),
+                        "date": data.get("date") or (dm.group(1) if dm else "")}
         if not trains:
             continue
         pick, seat = None, ""
@@ -268,20 +283,37 @@ def _ticket_ensure_action(state) -> bool:
                 break
         if not pick:
             pick, seat = trains[0], next(iter(trains[0].get("price", {})), "二等座")
+        # 乘客缺省：画像姓名 → 登录用户名 → 待补充
+        try:
+            from utils.storage import get_current_user
+            from core.memory import get_profile
+            passenger = ((get_profile() or {}).get("name") or get_current_user() or "待补充")
+        except Exception:
+            passenger = "待补充"
+        price = pick.get("price", {}).get(seat, 0)
         args = {
             "train_no": pick.get("train_no", ""),
             "from_station": data.get("from_station", ""), "to_station": data.get("to_station", ""),
             "date": data.get("date", ""), "seat_type": seat,
-            "passenger": "", "price": pick.get("price", {}).get(seat, 0),
+            "passenger": passenger, "price": price,
             "depart_time": pick.get("depart_time", ""), "arrive_time": pick.get("arrive_time", ""),
         }
         state.pending_actions = [{"tool": "book_train_ticket", "args": args, "agent": "ticket_agent"}]
         state.needs_confirmation = True
         state.interrupted = True
+        price_txt = f"¥{price:g}" if isinstance(price, (int, float)) and price else "以12306实际为准"
         state.interrupt_data = {
             "type": "action_confirmation", "actions": state.pending_actions,
-            "message": (f"⚠️ 票务Agent为您锁定 {args['train_no']} {args['from_station']}→{args['to_station']}"
-                        f" {args['date']} {seat}，请确认是否预订："),
+            "message": (
+                "⚠️ 请核对高铁票预订信息：\n"
+                f"• 车次：{args['train_no']}\n"
+                f"• 区间：{args['from_station']} → {args['to_station']}\n"
+                f"• 日期：{args['date'] or '（以12306为准）'}\n"
+                f"• 时间：{args['depart_time']} 出发 → {args['arrive_time']} 到达\n"
+                f"• 席别：{seat}　票价：{price_txt}\n"
+                f"• 乘客：{passenger}\n"
+                "确认后即完成预订（模拟订单，无真实扣款）。"
+            ),
         }
         state.metadata["resume_node"] = "guardrail_output"
         state.thinking.append(f"[票务Agent] 自动构造预订请求 {args['train_no']}（等待用户确认）")

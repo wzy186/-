@@ -99,6 +99,26 @@ def tool_lines_for(cfg: SpecialistConfig) -> str:
     return "\n".join(lines)
 
 
+def _format_action_line(a: dict) -> str:
+    """把待确认操作格式化成人类可读的核对信息。"""
+    import json as _json
+    name, args = a.get("tool", ""), a.get("args", {}) or {}
+    if name == "book_train_ticket":
+        return (f"高铁票 {args.get('train_no','')} {args.get('from_station','')} → {args.get('to_station','')}\n"
+                f"　 日期：{args.get('date','待定')}　{args.get('depart_time','')} 出发 → {args.get('arrive_time','')} 到达\n"
+                f"　 席别：{args.get('seat_type','二等座')}　票价：¥{args.get('price', 0):g}\n"
+                f"　 乘客：{args.get('passenger','待补充')}")
+    if name == "book_flight":
+        return (f"机票 {args.get('airline','')} {args.get('departure','')} → {args.get('arrival','')}\n"
+                f"　 日期：{args.get('date','待定')}　乘客：{args.get('passenger','待补充')}\n"
+                f"　 价格：¥{args.get('price', 0):g}　座位：{args.get('seat','无偏好')}")
+    if name == "book_hotel":
+        return (f"酒店 {args.get('name','')}（{args.get('city','')}）\n"
+                f"　 {args.get('check_in','')} → {args.get('check_out','')}　{args.get('room_type','')}\n"
+                f"　 ¥{args.get('price_per_night', 0):g}/晚 × {args.get('nights', 1)}晚　入住人：{args.get('guest','待补充')}")
+    return f"{name}: {_json.dumps(args, ensure_ascii=False)[:120]}"
+
+
 def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
     """把专家配置编译成可执行的 ReAct 子图。"""
 
@@ -213,15 +233,12 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
         if pending:
             state.pending_actions = pending
             state.needs_confirmation = True
-            desc = "\n".join(
-                f"• {a['tool']}: {json.dumps(a['args'], ensure_ascii=False)[:100]}"
-                for a in pending
-            )
+            desc = "\n".join(f"• {_format_action_line(a)}" for a in pending)
             state.interrupted = True
             state.interrupt_data = {
                 "type": "action_confirmation",
                 "actions": pending,
-                "message": f"⚠️ {cfg.label}请求执行以下操作，请确认：\n{desc}",
+                "message": (f"⚠️ 请核对{cfg.label}的预订信息（确认后完成预订，模拟订单无真实扣款）：\n{desc}"),
             }
             state.metadata["resume_node"] = "guardrail_output"
         return state
