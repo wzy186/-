@@ -307,10 +307,10 @@ def _ticket_ensure_action(state) -> bool:
         price_txt = f"¥{price:g}" if isinstance(price, (int, float)) and price else "以12306实际为准"
         # 可选方案列表（最多3个）+ 已选方案标注
         opt_lines = []
-        for i, t in enumerate([t2 for t2 in trains if t2 is not pick][:2], 1):
-            p2_ = t2.get("price", {})
-            cheapest = min(p2_.values()) if p2_ else 0
-            opt_lines.append(f"{i}) {t2.get('train_no','')}　{t2.get('depart_time','')} → {t2.get('arrive_time','')}　"
+        for i, alt in enumerate([x for x in trains if x is not pick][:2], 1):
+            alt_price = alt.get("price", {})
+            cheapest = min(alt_price.values()) if alt_price else 0
+            opt_lines.append(f"{i}) {alt.get('train_no','')}　{alt.get('depart_time','')} → {alt.get('arrive_time','')}　"
                              f"{'¥%g' % cheapest if cheapest else '票价以12306为准'}")
         opts_txt = ("\n其他可选：\n" + "\n".join(opt_lines)) if opt_lines else ""
         state.interrupt_data = {
