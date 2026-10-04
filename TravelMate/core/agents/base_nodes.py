@@ -99,6 +99,36 @@ def tool_lines_for(cfg: SpecialistConfig) -> str:
     return "\n".join(lines)
 
 
+def _train_options_text(state, exclude_train_no: str = "") -> str:
+    """从查询结果中提取其他可选车次（最多2个），供确认信息展示。"""
+    import re as _re
+    row = _re.compile(r"([GDCK]\d{1,4})\s+([^\s|(]+)(?:\([^)]*\))?\s*->\s*([^\s|(]+)(?:\([^)]*\))?\s*"
+                      r"(\d{1,2}:\d{2})\s*->\s*(\d{1,2}:\d{2})")
+    for tr in reversed(state.tool_results):
+        data = tr.get("result") or {}
+        trains = data.get("trains") or []
+        if not trains:
+            raw = str(data.get("raw") or data.get("message") or "")
+            trains = []
+            for m in row.finditer(raw):
+                seg = raw[m.end():m.end() + 260]
+                prices = [float(x) for x in _re.findall(r"¥?(\d{3,5}(?:\.\d)?)", seg)]
+                trains.append({"train_no": m.group(1), "depart_time": m.group(4),
+                               "arrive_time": m.group(5),
+                               "price": {"参考": min(prices)} if prices else {}})
+        if trains:
+            lines = []
+            for t in trains:
+                if t.get("train_no") == exclude_train_no or len(lines) >= 2:
+                    continue
+                prices = t.get("price", {})
+                p_txt = f"¥{min(prices.values()):g}" if prices else "票价以12306为准"
+                lines.append(f"{t.get('train_no','')}　{t.get('depart_time','')} → {t.get('arrive_time','')}　{p_txt}")
+            if lines:
+                return "\n".join(f"{i}) {l}" for i, l in enumerate(lines, 1))
+    return ""
+
+
 def _format_action_line(a: dict) -> str:
     """把待确认操作格式化成人类可读的核对信息。"""
     import json as _json
@@ -234,11 +264,13 @@ def build_specialist_graph(cfg: SpecialistConfig) -> CompiledGraph:
             state.pending_actions = pending
             state.needs_confirmation = True
             desc = "\n".join(f"• {_format_action_line(a)}" for a in pending)
+            opts = _train_options_text(state, pending[0].get("args", {}).get("train_no", ""))
+            opts_txt = ("\n\n其他可选车次：\n" + opts) if opts else ""
             state.interrupted = True
             state.interrupt_data = {
                 "type": "action_confirmation",
                 "actions": pending,
-                "message": (f"⚠️ 请核对{cfg.label}的预订信息（确认后完成预订，模拟订单无真实扣款）：\n{desc}"),
+                "message": (f"⚠️ 请核对{cfg.label}的预订信息（确认后即完成预订）：\n{desc}{opts_txt}"),
             }
             state.metadata["resume_node"] = "guardrail_output"
         return state

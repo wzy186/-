@@ -282,7 +282,10 @@ def _ticket_ensure_action(state) -> bool:
                 pick, seat = t, ("二等座" if "二等座" in available else available[0])
                 break
         if not pick:
-            pick, seat = trains[0], next(iter(trains[0].get("price", {})), "二等座")
+            # 无余票状态信息时按价格从低到高选席别（二等座优先）
+            prices = trains[0].get("price", {})
+            seat = min(prices, key=prices.get) if prices else "二等座"
+            pick = trains[0]
         # 乘客缺省：画像姓名 → 登录用户名 → 待补充
         try:
             from utils.storage import get_current_user
@@ -302,17 +305,24 @@ def _ticket_ensure_action(state) -> bool:
         state.needs_confirmation = True
         state.interrupted = True
         price_txt = f"¥{price:g}" if isinstance(price, (int, float)) and price else "以12306实际为准"
+        # 可选方案列表（最多3个）+ 已选方案标注
+        opt_lines = []
+        for i, t in enumerate([t2 for t2 in trains if t2 is not pick][:2], 1):
+            p2_ = t2.get("price", {})
+            cheapest = min(p2_.values()) if p2_ else 0
+            opt_lines.append(f"{i}) {t2.get('train_no','')}　{t2.get('depart_time','')} → {t2.get('arrive_time','')}　"
+                             f"{'¥%g' % cheapest if cheapest else '票价以12306为准'}")
+        opts_txt = ("\n其他可选：\n" + "\n".join(opt_lines)) if opt_lines else ""
         state.interrupt_data = {
             "type": "action_confirmation", "actions": state.pending_actions,
             "message": (
-                "⚠️ 请核对高铁票预订信息：\n"
-                f"• 车次：{args['train_no']}\n"
-                f"• 区间：{args['from_station']} → {args['to_station']}\n"
-                f"• 日期：{args['date'] or '（以12306为准）'}\n"
-                f"• 时间：{args['depart_time']} 出发 → {args['arrive_time']} 到达\n"
-                f"• 席别：{seat}　票价：{price_txt}\n"
-                f"• 乘客：{passenger}\n"
-                "确认后即完成预订（模拟订单，无真实扣款）。"
+                "⚠️ 请确认高铁票预订（12306 实时余票）：\n"
+                f"✅ 已选择：{args['train_no']}　{args['depart_time']} → {args['arrive_time']}"
+                f"　{seat} {price_txt}\n"
+                f"　 区间：{args['from_station']} → {args['to_station']}　日期：{args['date'] or '以12306为准'}\n"
+                f"　 乘客：{passenger}\n"
+                f"{opts_txt}\n"
+                "确认后即完成预订。"
             ),
         }
         state.metadata["resume_node"] = "guardrail_output"
