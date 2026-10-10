@@ -2,8 +2,6 @@
 
 模拟电商客服对话，实时看 **Jev**（TypeSafe AI 的 System One 结构化决策模型）怎么判、怎么路由、怎么拦。
 
-> 本仓库基于 [kiler398/jev-demo](https://github.com/kiler398/jev-demo) 部署，已接入真实 Jev 模型（`jev-1.13.0`）验证通过。
-
 ```
 用户/客服消息 ──▶ Jev systemone ──▶ 归一化 ──▶ 决策表 ──▶ 队列 + 优先级 + SLA
                 （choice/score/noul）            └──▶ 拦截器 ──▶ block / warn + 改写建议
