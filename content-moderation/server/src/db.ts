@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 // server/data/moderation.db（开发与构建产物下均解析到 server/ 目录）
 const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = path.join(serverRoot, 'data');
-export const DB_PATH = path.join(DATA_DIR, 'moderation.db');
+// 集成测试通过环境变量指向临时数据库
+export const DB_PATH = process.env.MODERATION_DB_PATH ?? path.join(DATA_DIR, 'moderation.db');
 
 let db: DatabaseSync | undefined;
 

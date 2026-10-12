@@ -35,6 +35,12 @@ npm start        # http://localhost:3000
 npm run seed     # 建议在服务停止时执行（服务运行中执行也可以，写锁冲突会自动等待重试）
 ```
 
+运行测试：
+
+```bash
+npm test         # 服务端 API 集成测试（node:test，跑在独立临时数据库上，不碰演示数据）
+```
+
 ## 功能
 
 - **审核队列**：状态 Tab（待审核 / 已通过 / 已驳回 / 全部，带数量角标）、关键词搜索（标题 / 内容 / 作者）、按提交时间排序、分页
@@ -65,7 +71,9 @@ pending（待审核） ──approve──▶ approved（已通过）
 server/                  Express + SQLite（node:sqlite）
   src/db.ts              建库建表
   src/seed.ts            演示数据（npm run seed 重置）
-  src/index.ts           全部 API + 生产模式静态托管
+  src/app.ts             全部 API（与启动逻辑分离，便于测试）
+  src/index.ts           启动入口 + 生产模式静态托管
+  test/api.test.ts       API 集成测试（node:test）
 web/                     Vue 3 + Element Plus
   src/views/ReviewQueue.vue     审核队列（列表/批量/详情/驳回弹窗）
   src/views/ReviewLogs.vue      操作日志
