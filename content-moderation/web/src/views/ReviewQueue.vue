@@ -178,28 +178,22 @@ async function onBatchApprove() {
 }
 
 // ---------- 驳回弹窗（单个 / 批量共用） ----------
-interface RejectOption {
-  label: string
-  custom: boolean
-}
 const rejectVisible = ref(false)
 const rejectMode = ref<'single' | 'batch'>('single')
 const rejectTarget = ref<SubmissionItem | null>(null)
-const rejectChoice = ref<RejectOption>({ label: '', custom: false })
+// 注意：el-radio 的 value 只支持 String/Number/Boolean，这里直接用原因文案字符串，
+// 「自定义」通过是否选中 CUSTOM_REASON_LABEL 判断，不能用对象当 radio 值
+const rejectChoice = ref('')
 const rejectNote = ref('')
 const rejectSubmitting = ref(false)
 
-const rejectOptions = computed<RejectOption[]>(() => [
-  ...rejectReasons.value.map((label) => ({ label, custom: false })),
-  { label: CUSTOM_REASON_LABEL, custom: true },
-])
 const rejectTitle = computed(() =>
   rejectMode.value === 'batch' ? `批量驳回 ${selectedRows.value.length} 条投稿` : '驳回投稿',
 )
-const needCustomReason = computed(() => rejectChoice.value.custom)
+const needCustomReason = computed(() => rejectChoice.value === CUSTOM_REASON_LABEL)
 
 function resetRejectForm() {
-  rejectChoice.value = rejectOptions.value[0] ?? { label: '', custom: true }
+  rejectChoice.value = rejectReasons.value[0] ?? CUSTOM_REASON_LABEL
   rejectNote.value = ''
 }
 function openReject(row: SubmissionItem) {
@@ -217,9 +211,9 @@ function openBatchReject() {
 }
 
 function composeReason(): string | null {
-  if (rejectChoice.value.custom) return rejectNote.value.trim() || null
+  if (rejectChoice.value === CUSTOM_REASON_LABEL) return rejectNote.value.trim() || null
   const note = rejectNote.value.trim()
-  return note ? `${rejectChoice.value.label} · ${note}` : rejectChoice.value.label
+  return note ? `${rejectChoice.value} · ${note}` : rejectChoice.value
 }
 
 async function submitReject() {
@@ -496,7 +490,8 @@ onMounted(() => {
     <div class="reject-form">
       <div class="reject-label">驳回原因</div>
       <el-radio-group v-model="rejectChoice">
-        <el-radio v-for="o in rejectOptions" :key="o.label" :value="o">{{ o.label }}</el-radio>
+        <el-radio v-for="r in rejectReasons" :key="r" :value="r">{{ r }}</el-radio>
+        <el-radio :value="CUSTOM_REASON_LABEL">{{ CUSTOM_REASON_LABEL }}</el-radio>
       </el-radio-group>
       <el-input
         v-model="rejectNote"
