@@ -20,9 +20,10 @@ const loading = ref(false)
 
 // 请求序号：并发加载时只认最后一次请求的响应，避免旧响应覆盖新数据
 let loadSeq = 0
-async function load() {
+// silent: 轮询触发的静默刷新，不显示表格 loading 遮罩
+async function load(silent = false) {
   const seq = ++loadSeq
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const r = await api.submissions({
       status: statusTab.value,
@@ -44,7 +45,7 @@ async function load() {
     if (seq !== loadSeq) return
     ElMessage.error(e instanceof Error ? e.message : '加载失败')
   } finally {
-    if (seq === loadSeq) loading.value = false
+    if (seq === loadSeq && !silent) loading.value = false
   }
 }
 
@@ -290,10 +291,39 @@ function detailReopen() {
   if (detailItem.value) void onReopen(detailItem.value)
 }
 
+// ---------- 轮询：同步他人审核结果 ----------
+// 页面可见时每 10s 静默刷新列表与统计，值班时能看到其他操作人的审核结果；
+// 弹窗打开、动作进行中、有勾选时暂停，避免刷新打断正在进行的操作
+const POLL_INTERVAL_MS = 10_000
+let pollTimer: ReturnType<typeof setInterval> | undefined
+
+function pollBlocked(): boolean {
+  return (
+    document.visibilityState !== 'visible' ||
+    actionBusy.value ||
+    rejectVisible.value ||
+    detailVisible.value ||
+    selectedRows.value.length > 0
+  )
+}
+async function pollTick() {
+  if (pollBlocked()) return
+  await Promise.all([load(true), refreshStats()])
+}
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') void pollTick()
+}
+
 onMounted(() => {
   void load()
   void refreshStats()
   void loadRejectReasons()
+  pollTimer = setInterval(() => void pollTick(), POLL_INTERVAL_MS)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
