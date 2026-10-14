@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { TableInstance } from 'element-plus'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { currentOperator, loadRejectReasons, rejectReasons } from '../state'
 import { CUSTOM_REASON_LABEL, STATUS_LABEL, STATUS_TAG, fmtTime } from '../constants'
@@ -291,6 +291,57 @@ function detailReopen() {
   if (detailItem.value) void onReopen(detailItem.value)
 }
 
+// ---------- 模拟投稿弹窗 ----------
+// 值班场景里投稿由用户提交，这里提供入口以便演示完整闭环：投稿 → 待审核 → 审核
+const submitVisible = ref(false)
+const submitForm = reactive({ title: '', author: '', content: '', imageUrls: [''] })
+const submitSubmitting = ref(false)
+
+function addImageField() {
+  if (submitForm.imageUrls.length < 4) submitForm.imageUrls.push('')
+}
+function removeImageField(i: number) {
+  submitForm.imageUrls.splice(i, 1)
+}
+function resetSubmitForm() {
+  submitForm.title = ''
+  submitForm.author = ''
+  submitForm.content = ''
+  submitForm.imageUrls = ['']
+}
+async function submitNewSubmission() {
+  const urls = submitForm.imageUrls.map((u) => u.trim()).filter(Boolean)
+  if (!submitForm.title.trim() || !submitForm.content.trim() || !submitForm.author.trim()) {
+    ElMessage.warning('标题、正文、作者都必填')
+    return
+  }
+  if (!urls.every((u) => /^https?:\/\//.test(u))) {
+    ElMessage.warning('图片 URL 必须是 http(s) 链接')
+    return
+  }
+  submitSubmitting.value = true
+  try {
+    const r = await api.createSubmission({
+      title: submitForm.title.trim(),
+      content: submitForm.content.trim(),
+      author: submitForm.author.trim(),
+      imageUrls: urls,
+    })
+    ElMessage.success(`已提交「${r.item.title}」，进入待审核队列`)
+    submitVisible.value = false
+    resetSubmitForm()
+    // 切到待审核队列并回到第一页，让新投稿立刻可见
+    if (statusTab.value !== 'pending') statusTab.value = 'pending'
+    else if (page.value !== 1) page.value = 1
+    else void load()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '提交失败')
+  } finally {
+    submitSubmitting.value = false
+  }
+  void refreshStats()
+}
+
 // ---------- 轮询：同步他人审核结果 ----------
 // 页面可见时每 10s 静默刷新列表与统计，值班时能看到其他操作人的审核结果；
 // 弹窗打开、动作进行中、有勾选时暂停，避免刷新打断正在进行的操作
@@ -303,6 +354,7 @@ function pollBlocked(): boolean {
     actionBusy.value ||
     rejectVisible.value ||
     detailVisible.value ||
+    submitVisible.value ||
     selectedRows.value.length > 0
   )
 }
@@ -371,6 +423,7 @@ onUnmounted(() => {
         <el-option label="最早提交" value="oldest" />
       </el-select>
       <el-button :icon="Refresh" @click="load">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="submitVisible = true">模拟投稿</el-button>
     </div>
 
     <div v-if="selectedRows.length" class="batch-bar">
@@ -534,6 +587,38 @@ onUnmounted(() => {
     <template #footer>
       <el-button @click="rejectVisible = false">取消</el-button>
       <el-button type="danger" :loading="rejectSubmitting" @click="submitReject">确认驳回</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 模拟投稿弹窗 -->
+  <el-dialog v-model="submitVisible" title="模拟投稿" width="520px">
+    <el-form label-width="70px" @submit.prevent>
+      <el-form-item label="标题" required>
+        <el-input v-model="submitForm.title" maxlength="200" placeholder="投稿标题" />
+      </el-form-item>
+      <el-form-item label="作者" required>
+        <el-input v-model="submitForm.author" maxlength="50" placeholder="投稿人昵称" />
+      </el-form-item>
+      <el-form-item label="正文" required>
+        <el-input v-model="submitForm.content" type="textarea" :rows="5" maxlength="10000" placeholder="正文内容" />
+      </el-form-item>
+      <el-form-item label="图片">
+        <div class="img-urls">
+          <div v-for="(_, i) in submitForm.imageUrls" :key="i" class="img-url-row">
+            <el-input v-model="submitForm.imageUrls[i]" placeholder="https://...（可空，最多 4 张）" />
+            <el-button link type="danger" :disabled="submitForm.imageUrls.length <= 1" @click="removeImageField(i)">
+              删除
+            </el-button>
+          </div>
+          <el-button link type="primary" :disabled="submitForm.imageUrls.length >= 4" @click="addImageField">
+            + 添加图片
+          </el-button>
+        </div>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="submitVisible = false">取消</el-button>
+      <el-button type="primary" :loading="submitSubmitting" @click="submitNewSubmission">提交投稿</el-button>
     </template>
   </el-dialog>
 </template>
@@ -711,5 +796,16 @@ onUnmounted(() => {
 
 .reject-note {
   margin-top: 14px;
+}
+
+.img-urls {
+  width: 100%;
+}
+
+.img-url-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
 }
 </style>

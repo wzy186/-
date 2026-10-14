@@ -146,6 +146,36 @@ export function createApp(): express.Express {
     res.json({ items: rows.map(toItem), total: totalRow.n, page, pageSize });
   });
 
+  // 新建投稿（模拟用户投稿入口）：直接进入待审核队列
+  app.post('/api/submissions', (req, res) => {
+    const { title, content, author, imageUrls } = (req.body ?? {}) as {
+      title?: unknown; content?: unknown; author?: unknown; imageUrls?: unknown;
+    };
+    const t = typeof title === 'string' ? title.trim() : '';
+    const c = typeof content === 'string' ? content.trim() : '';
+    const a = typeof author === 'string' ? author.trim() : '';
+    if (!t) return bad(res, 400, '标题不能为空');
+    if (!c) return bad(res, 400, '正文不能为空');
+    if (!a) return bad(res, 400, '作者不能为空');
+    if (t.length > 200) return bad(res, 400, '标题最长 200 字');
+    if (c.length > 10_000) return bad(res, 400, '正文最长 10000 字');
+    if (a.length > 50) return bad(res, 400, '作者最长 50 字');
+    if (imageUrls !== undefined && !Array.isArray(imageUrls)) return bad(res, 400, 'imageUrls 必须是数组');
+    const urls = (imageUrls as unknown[] | undefined) ?? [];
+    if (urls.length > 4) return bad(res, 400, '图片最多 4 张');
+    if (!urls.every((u) => typeof u === 'string' && /^https?:\/\//.test(u.trim()))) {
+      return bad(res, 400, '图片 URL 必须是 http(s) 链接');
+    }
+
+    const db = getDb();
+    const now = new Date().toISOString();
+    const result = db
+      .prepare(`INSERT INTO submissions (title, content, image_urls, author, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`)
+      .run(t, c, JSON.stringify(urls.map((u) => String(u).trim())), a, now);
+    const row = db.prepare(`SELECT ${SUB_COLUMNS} FROM submissions WHERE id = ?`).get(result.lastInsertRowid) as unknown as SubRow;
+    res.status(201).json({ item: toItem(row) });
+  });
+
   app.get('/api/submissions/:id', (req, res) => {
     const db = getDb();
     const row = db.prepare(`SELECT ${SUB_COLUMNS} FROM submissions WHERE id = ?`).get(Number(req.params.id)) as unknown as SubRow | undefined;

@@ -51,6 +51,9 @@ export const api = {
 
   submission: (id: number) => request<SubmissionItem>(`/api/submissions/${id}`),
 
+  createSubmission: (body: { title: string; content: string; author: string; imageUrls: string[] }) =>
+    post<{ item: SubmissionItem }>('/api/submissions', body),
+
   review: (id: number, body: { action: ReviewAction; reason?: string; operator: string }) =>
     post<{ item: SubmissionItem }>(`/api/submissions/${id}/review`, body),
 

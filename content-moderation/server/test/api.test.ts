@@ -201,3 +201,40 @@ test('统计随操作变化；坏 JSON 返回 400', async () => {
   });
   assert.equal(bad.status, 400);
 });
+
+test('新建投稿：校验、进入待审核队列、可被审核', async () => {
+  // 必填校验
+  const noTitle = await jpost('/api/submissions', { content: 'x', author: '张三' });
+  assert.equal(noTitle.status, 400);
+  const noAuthor = await jpost('/api/submissions', { title: '标题', content: '正文' });
+  assert.equal(noAuthor.status, 400);
+
+  // 图片校验：非 http(s) 链接、超过 4 张
+  const badUrl = await jpost('/api/submissions', {
+    title: 't', content: 'c', author: 'a', imageUrls: ['ftp://x'],
+  });
+  assert.equal(badUrl.status, 400);
+  const tooMany = await jpost('/api/submissions', {
+    title: 't', content: 'c', author: 'a',
+    imageUrls: ['https://a', 'https://b', 'https://c', 'https://d', 'https://e'],
+  });
+  assert.equal(tooMany.status, 400);
+
+  // 成功创建 → 待审核 → 出现在队列最前（最新提交排前）
+  const created = await jpost('/api/submissions', {
+    title: '测试投稿：新品发布会', content: '正文内容', author: '测试用户',
+    imageUrls: ['https://picsum.photos/seed/test/600/400'],
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.item.status, 'pending');
+  assert.equal(created.body.item.author, '测试用户');
+  assert.deepEqual(created.body.item.imageUrls, ['https://picsum.photos/seed/test/600/400']);
+
+  const p = await jget('/api/submissions?status=pending&pageSize=1');
+  assert.equal(p.body.items[0].id, created.body.item.id);
+
+  // 闭环：可被正常审核
+  const r = await jpost(`/api/submissions/${created.body.item.id}/review`, { action: 'approve', operator: '林晚晴' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.item.status, 'approved');
+});
