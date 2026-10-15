@@ -165,9 +165,11 @@ async function onBatchApprove() {
   actionBusy.value = true
   try {
     const r = await api.batchReview({ ids: selectedRows.value.map((x) => x.id), action: 'approve', operator })
-    let msg = `已通过 ${r.updated} 条`
-    if (r.skipped > 0) msg += `，跳过 ${r.skipped} 条（已不在待审核状态）`
-    if (r.updated === 0) ElMessage.warning(msg)
+    const msg = `已通过 ${r.updated} 条`
+    const skipMsg = r.skipped > 0 ? `，跳过 ${r.skipped} 条（已不在待审核状态）` : ''
+    // 有跳过时用警示样式并停留更久，避免「选 2 条只处理了 1 条」被误以为丢数据
+    if (r.skipped > 0) ElMessage.warning({ message: msg + skipMsg, duration: 5000 })
+    else if (r.updated === 0) ElMessage.warning(msg)
     else ElMessage.success(msg)
     clearSelection()
   } catch (e) {
@@ -235,9 +237,11 @@ async function submitReject() {
   try {
     if (rejectMode.value === 'batch') {
       const r = await api.batchReview({ ids: selectedRows.value.map((x) => x.id), action: 'reject', reason, operator })
-      let msg = `已驳回 ${r.updated} 条`
-      if (r.skipped > 0) msg += `，跳过 ${r.skipped} 条（已不在待审核状态）`
-      if (r.updated === 0) ElMessage.warning(msg)
+      const msg = `已驳回 ${r.updated} 条`
+      const skipMsg = r.skipped > 0 ? `，跳过 ${r.skipped} 条（已不在待审核状态）` : ''
+      // 有跳过时用警示样式并停留更久，避免「选 2 条只处理了 1 条」被误以为丢数据
+      if (r.skipped > 0) ElMessage.warning({ message: msg + skipMsg, duration: 5000 })
+      else if (r.updated === 0) ElMessage.warning(msg)
       else ElMessage.success(msg)
     } else if (rejectTarget.value) {
       await api.review(rejectTarget.value.id, { action: 'reject', reason, operator })
