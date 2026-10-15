@@ -191,7 +191,7 @@ const rejectNote = ref('')
 const rejectSubmitting = ref(false)
 
 const rejectTitle = computed(() =>
-  rejectMode.value === 'batch' ? `批量驳回 ${selectedRows.value.length} 条投稿` : '驳回投稿',
+  rejectMode.value === 'batch' ? `批量驳回 ${batchItems.value.length} 条投稿` : '驳回投稿',
 )
 const needCustomReason = computed(() => rejectChoice.value === CUSTOM_REASON_LABEL)
 
@@ -205,11 +205,26 @@ function openReject(row: SubmissionItem) {
   resetRejectForm()
   rejectVisible.value = true
 }
+// 批量驳回：每条一个原因快照，支持逐条指定不同原因
+interface BatchRejectItem {
+  id: number
+  title: string
+  reason: string
+  note: string
+}
+const batchItems = ref<BatchRejectItem[]>([])
+const applyAllReason = ref('')
+
+function applyReasonToAll() {
+  if (!applyAllReason.value) return
+  for (const b of batchItems.value) b.reason = applyAllReason.value
+}
 function openBatchReject() {
   if (!selectedRows.value.length) return
   rejectMode.value = 'batch'
   rejectTarget.value = null
-  resetRejectForm()
+  batchItems.value = selectedRows.value.map((x) => ({ id: x.id, title: x.title, reason: '', note: '' }))
+  applyAllReason.value = ''
   rejectVisible.value = true
 }
 
@@ -220,13 +235,7 @@ function composeReason(): string | null {
 }
 
 async function submitReject() {
-  const reason = composeReason()
-  if (!reason) {
-    ElMessage.warning('请填写具体驳回原因')
-    return
-  }
-  // 弹窗开着时用户可能取消了勾选，提交前复核
-  if (rejectMode.value === 'batch' && !selectedRows.value.length) {
+  if (rejectMode.value === 'batch' && !batchItems.value.length) {
     rejectVisible.value = false
     ElMessage.warning('未选择任何投稿')
     return
@@ -236,7 +245,24 @@ async function submitReject() {
   rejectSubmitting.value = true
   try {
     if (rejectMode.value === 'batch') {
-      const r = await api.batchReview({ ids: selectedRows.value.map((x) => x.id), action: 'reject', reason, operator })
+      // 逐条校验：「其他」必须补具体说明，其余可带可选备注
+      for (const b of batchItems.value) {
+        if (!b.reason) {
+          ElMessage.warning(`「${b.title}」还没选驳回原因`)
+          return
+        }
+        if (b.reason === CUSTOM_REASON_LABEL && !b.note.trim()) {
+          ElMessage.warning(`「${b.title}」选「其他」时必须填写具体原因`)
+          return
+        }
+      }
+      const compose = (b: BatchRejectItem) => (b.note.trim() ? `${b.reason} · ${b.note.trim()}` : b.reason)
+      const r = await api.batchReview({
+        ids: batchItems.value.map((b) => b.id),
+        action: 'reject',
+        reasons: Object.fromEntries(batchItems.value.map((b) => [String(b.id), compose(b)])),
+        operator,
+      })
       const msg = `已驳回 ${r.updated} 条`
       const skipMsg = r.skipped > 0 ? `，跳过 ${r.skipped} 条（已不在待审核状态）` : ''
       // 有跳过时用警示样式并停留更久，避免「选 2 条只处理了 1 条」被误以为丢数据
@@ -244,6 +270,11 @@ async function submitReject() {
       else if (r.updated === 0) ElMessage.warning(msg)
       else ElMessage.success(msg)
     } else if (rejectTarget.value) {
+      const reason = composeReason()
+      if (!reason) {
+        ElMessage.warning('请填写具体驳回原因')
+        return
+      }
       await api.review(rejectTarget.value.id, { action: 'reject', reason, operator })
       ElMessage.success(`已驳回「${rejectTarget.value.title}」`)
     }
@@ -603,20 +634,48 @@ onUnmounted(() => {
   </el-dialog>
 
   <!-- 驳回弹窗 -->
-  <el-dialog v-model="rejectVisible" :title="rejectTitle" width="480px">
+  <el-dialog v-model="rejectVisible" :title="rejectTitle" :width="rejectMode === 'batch' ? '640px' : '480px'">
     <div class="reject-form">
-      <div class="reject-label">驳回原因</div>
-      <el-radio-group v-model="rejectChoice">
-        <el-radio v-for="r in rejectReasons" :key="r" :value="r">{{ r }}</el-radio>
-        <el-radio :value="CUSTOM_REASON_LABEL">{{ CUSTOM_REASON_LABEL }}</el-radio>
-      </el-radio-group>
-      <el-input
-        v-model="rejectNote"
-        type="textarea"
-        :rows="3"
-        :placeholder="needCustomReason ? '请填写具体原因' : '补充说明（可选，会一并记录）'"
-        class="reject-note"
-      />
+      <template v-if="rejectMode === 'single'">
+        <div class="reject-label">驳回原因</div>
+        <el-radio-group v-model="rejectChoice">
+          <el-radio v-for="r in rejectReasons" :key="r" :value="r">{{ r }}</el-radio>
+          <el-radio :value="CUSTOM_REASON_LABEL">{{ CUSTOM_REASON_LABEL }}</el-radio>
+        </el-radio-group>
+        <el-input
+          v-model="rejectNote"
+          type="textarea"
+          :rows="3"
+          :placeholder="needCustomReason ? '请填写具体原因' : '补充说明（可选，会一并记录）'"
+          class="reject-note"
+        />
+      </template>
+      <template v-else>
+        <div class="batch-apply-all">
+          <el-select v-model="applyAllReason" placeholder="选择原因并应用到全部" clearable style="width: 200px">
+            <el-option v-for="r in rejectReasons" :key="r" :label="r" :value="r" />
+            <el-option :label="CUSTOM_REASON_LABEL" :value="CUSTOM_REASON_LABEL" />
+          </el-select>
+          <el-button size="small" @click="applyReasonToAll">应用</el-button>
+          <span class="apply-all-hint">或逐条单独指定</span>
+        </div>
+        <div class="batch-reject-list">
+          <div v-for="b in batchItems" :key="b.id" class="batch-item">
+            <div class="batch-item-title" :title="b.title">{{ b.title }}</div>
+            <div class="batch-item-controls">
+              <el-select v-model="b.reason" placeholder="选择原因" size="small" style="width: 150px; flex: none">
+                <el-option v-for="r in rejectReasons" :key="r" :label="r" :value="r" />
+                <el-option :label="CUSTOM_REASON_LABEL" :value="CUSTOM_REASON_LABEL" />
+              </el-select>
+              <el-input
+                v-model="b.note"
+                size="small"
+                :placeholder="b.reason === CUSTOM_REASON_LABEL ? '必填具体原因' : '补充说明（可选）'"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
     <template #footer>
       <el-button @click="rejectVisible = false">取消</el-button>
@@ -863,6 +922,49 @@ onUnmounted(() => {
 
 .reject-note {
   margin-top: 14px;
+}
+
+.batch-apply-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.apply-all-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.batch-reject-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 0 12px;
+}
+
+.batch-item {
+  padding: 10px 0;
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.batch-item:last-child {
+  border-bottom: none;
+}
+
+.batch-item-title {
+  font-size: 13px;
+  color: #303133;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 6px;
+}
+
+.batch-item-controls {
+  display: flex;
+  gap: 8px;
 }
 
 .img-urls {

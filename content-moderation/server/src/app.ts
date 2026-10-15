@@ -224,18 +224,40 @@ export function createApp(): express.Express {
     res.json({ item: toItem(updated) });
   });
 
-  /** 批量审核：action = approve | reject，只处理仍处于待审核的条目 */
+  /** 批量审核：action = approve | reject，只处理仍处于待审核的条目。
+   *  驳回原因支持两种传法：统一的 reason（全部适用），或按条指定 reasons（id → 原因，优先于 reason）。
+   *  任一待驳回条目缺原因即整体 400，不产生部分写入。 */
   app.post('/api/submissions/batch-review', (req, res) => {
-    const { ids, action, reason, operator } = (req.body ?? {}) as {
-      ids?: unknown; action?: string; reason?: string; operator?: string;
+    const { ids, action, reason, reasons, operator } = (req.body ?? {}) as {
+      ids?: unknown; action?: string; reason?: string; reasons?: unknown; operator?: string;
     };
     if (!Array.isArray(ids) || ids.length === 0) return bad(res, 400, 'ids 必须是非空数组');
     if (ids.length > 500) return bad(res, 400, '单次批量操作最多 500 条');
     if (action !== 'approve' && action !== 'reject') return bad(res, 400, 'action 必须是 approve / reject');
     const op = (operator ?? '').trim();
     if (!op) return bad(res, 400, '缺少操作人 operator');
-    if (action === 'reject' && !(reason ?? '').trim()) return bad(res, 400, '驳回必须填写原因');
     if (!operatorExists(op)) return bad(res, 400, '操作人不存在');
+
+    // 按条原因表：只接受「数字 id → 非空字符串」的对象
+    const reasonMap = new Map<number, string>();
+    if (reasons !== undefined) {
+      if (typeof reasons !== 'object' || reasons === null || Array.isArray(reasons)) {
+        return bad(res, 400, 'reasons 必须是 id → 原因 的对象');
+      }
+      for (const [k, v] of Object.entries(reasons as Record<string, unknown>)) {
+        if (typeof v !== 'string' || !v.trim()) return bad(res, 400, 'reasons 中每个原因必须是非空字符串');
+        reasonMap.set(Number(k), v.trim());
+      }
+    }
+    // 驳回前逐条确认原因齐全（非法 id 不参与校验，仍走跳过语义）
+    if (action === 'reject') {
+      for (const raw of ids) {
+        const id = Number(raw);
+        if (!Number.isInteger(id)) continue;
+        const r = reasonMap.get(id) ?? (reason ?? '').trim();
+        if (!r) return bad(res, 400, `驳回原因缺失：投稿 #${id} 未填写原因`);
+      }
+    }
 
     const db = getDb();
     const now = new Date().toISOString();
@@ -249,7 +271,8 @@ export function createApp(): express.Express {
           skipped++;
           continue;
         }
-        if (applyReview(id, action, action === 'reject' ? (reason ?? null) : null, op, now)) updated++;
+        const r = action === 'reject' ? reasonMap.get(id) ?? (reason ?? null) : null;
+        if (applyReview(id, action, r, op, now)) updated++;
         else skipped++;
       }
       db.exec('COMMIT');

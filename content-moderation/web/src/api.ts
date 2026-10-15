@@ -57,8 +57,14 @@ export const api = {
   review: (id: number, body: { action: ReviewAction; reason?: string; operator: string }) =>
     post<{ item: SubmissionItem }>(`/api/submissions/${id}/review`, body),
 
-  batchReview: (body: { ids: number[]; action: 'approve' | 'reject'; reason?: string; operator: string }) =>
-    post<{ updated: number; skipped: number }>('/api/submissions/batch-review', body),
+  batchReview: (body: {
+    ids: number[]
+    action: 'approve' | 'reject'
+    reason?: string
+    /** 按条指定的驳回原因（id → 原因），优先于 reason */
+    reasons?: Record<string, string>
+    operator: string
+  }) => post<{ updated: number; skipped: number }>('/api/submissions/batch-review', body),
 
   logs: (query: { operator?: string; action?: ReviewAction | ''; page?: number; pageSize?: number }) => {
     const params = new URLSearchParams()

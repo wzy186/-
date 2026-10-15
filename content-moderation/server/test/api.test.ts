@@ -265,3 +265,42 @@ test('敏感词标记与审核时效统计', async () => {
   assert.ok(typeof t.avgReviewMinutes === 'number' && t.avgReviewMinutes > 0, '平均审核耗时应为正数');
   assert.ok(t.staleCount >= 1 && t.staleCount < 30, `超 24h 积压应落在 [1,30)，实际 ${t.staleCount}`);
 });
+
+test('批量驳回：按条指定不同原因、缺原因整体 400', async () => {
+  const p = await jget('/api/submissions?status=pending&pageSize=2');
+  assert.equal(p.body.items.length, 2);
+  const [a, b] = p.body.items as Array<{ id: number }>;
+
+  // 两条分别指定不同原因
+  const mixed = await jpost('/api/submissions/batch-review', {
+    ids: [a.id, b.id],
+    action: 'reject',
+    operator: '苏小满',
+    reasons: { [String(a.id)]: '广告营销', [String(b.id)]: '人身攻击' },
+  });
+  assert.equal(mixed.status, 200);
+  assert.equal(mixed.body.updated, 2);
+  assert.equal(mixed.body.skipped, 0);
+
+  // 日志里两条原因应各自不同
+  const logs = await jget('/api/logs?pageSize=100');
+  const byId: Record<number, string | null> = {};
+  for (const l of logs.body.items) {
+    if (l.submissionId === a.id || l.submissionId === b.id) byId[l.submissionId] = l.reason;
+  }
+  assert.equal(byId[a.id], '广告营销');
+  assert.equal(byId[b.id], '人身攻击');
+
+  // 有 id 缺原因 → 整体 400，且不应产生部分写入
+  const p2 = await jget('/api/submissions?status=pending&pageSize=1');
+  const cid = p2.body.items[0].id as number;
+  const missing = await jpost('/api/submissions/batch-review', {
+    ids: [cid],
+    action: 'reject',
+    operator: '苏小满',
+    reasons: { [String(cid)]: '' },
+  });
+  assert.equal(missing.status, 400);
+  const after = await jget(`/api/submissions/${cid}`);
+  assert.equal(after.body.status, 'pending', '缺原因的批次不应产生部分写入');
+});
