@@ -13,6 +13,8 @@ export interface SubmissionItem {
   reviewedBy: string | null
   reviewedAt: string | null
   createdAt: string
+  /** 命中的敏感词（后端匹配），用于「疑似违规」提示 */
+  flags: string[]
 }
 
 export interface Operator {
@@ -44,6 +46,7 @@ export interface Stats {
     submissionTitle: string
     reason: string | null
   }>
+  reviewTimeliness: { avgReviewMinutes: number | null; staleCount: number }
 }
 
 export interface PageResult<T> {

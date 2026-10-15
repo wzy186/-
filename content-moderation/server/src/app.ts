@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
-import { REJECT_REASONS } from './constants.js';
+import { REJECT_REASONS, SENSITIVE_WORDS } from './constants.js';
 
 /** 构建 Express 应用（与启动逻辑分离，便于集成测试直接挂到随机端口） */
 export function createApp(): express.Express {
@@ -53,6 +53,9 @@ export function createApp(): express.Express {
     } catch {
       imageUrls = [];
     }
+    // 敏感词提示：标题+正文合并后统一小写匹配，命中词随条目返回，供前端标记「疑似违规」
+    const text = `${row.title}\n${row.content}`.toLowerCase();
+    const flags = SENSITIVE_WORDS.filter((w) => text.includes(w));
     return {
       id: row.id,
       title: row.title,
@@ -65,6 +68,7 @@ export function createApp(): express.Express {
       reviewedBy: row.reviewedBy,
       reviewedAt: row.reviewedAt,
       createdAt: row.createdAt,
+      flags,
     };
   }
 
@@ -109,9 +113,9 @@ export function createApp(): express.Express {
     res.json(db.prepare('SELECT id, name FROM operators ORDER BY id').all());
   });
 
-  // 元数据（驳回原因预设等），前端从这取，避免前后端两份常量漂移
+  // 元数据（驳回原因预设、敏感词库），前端从这取，避免前后端两份常量漂移
   app.get('/api/meta', (_req, res) => {
-    res.json({ rejectReasons: REJECT_REASONS });
+    res.json({ rejectReasons: REJECT_REASONS, sensitiveWords: SENSITIVE_WORDS });
   });
 
   // ---------- 投稿 ----------
@@ -340,6 +344,15 @@ export function createApp(): express.Express {
       `)
       .all();
 
+    // 审核时效：已审条目平均耗时（分钟），以及待审核超过 24 小时的积压数
+    const avgRow = db
+      .prepare(`SELECT AVG((julianday(reviewed_at) - julianday(created_at)) * 24 * 60) AS avgMinutes FROM submissions WHERE reviewed_at IS NOT NULL`)
+      .get() as unknown as { avgMinutes: number | null };
+    const staleCutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const staleRow = db
+      .prepare(`SELECT COUNT(*) AS n FROM submissions WHERE status = 'pending' AND created_at < ?`)
+      .get(staleCutoff) as unknown as { n: number };
+
     res.json({
       pendingCount: dist.pending,
       today: { ...today, approveRate: rate(today.approved, today.processed) },
@@ -347,6 +360,10 @@ export function createApp(): express.Express {
       statusDistribution: dist,
       last7Days,
       recentLogs,
+      reviewTimeliness: {
+        avgReviewMinutes: avgRow.avgMinutes === null ? null : Math.round(avgRow.avgMinutes),
+        staleCount: staleRow.n,
+      },
     });
   });
 

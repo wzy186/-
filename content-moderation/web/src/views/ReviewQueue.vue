@@ -291,6 +291,21 @@ function detailReopen() {
   if (detailItem.value) void onReopen(detailItem.value)
 }
 
+// ---------- 敏感词提示 ----------
+// 把正文按命中词切成片段，命中片段用 <mark> 渲染；不用 v-html，避免注入
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+function highlightSegments(text: string, words: string[]): Array<{ text: string; hit: boolean }> {
+  const hits = words
+    .map((w) => w.toLowerCase())
+    .filter((w) => w && text.toLowerCase().includes(w))
+    .sort((a, b) => b.length - a.length)
+  if (!hits.length) return [{ text, hit: false }]
+  const re = new RegExp(`(${hits.map(escapeRe).join('|')})`, 'gi')
+  return text.split(re).map((seg) => ({ text: seg, hit: hits.some((h) => seg.toLowerCase() === h) }))
+}
+
 // ---------- 模拟投稿弹窗 ----------
 // 值班场景里投稿由用户提交，这里提供入口以便演示完整闭环：投稿 → 待审核 → 审核
 const submitVisible = ref(false)
@@ -462,6 +477,12 @@ onUnmounted(() => {
             <el-button link type="primary" class="title-link" @click="openDetail(row)">{{ row.title }}</el-button>
           </div>
           <div class="cell-excerpt">{{ row.excerpt }}</div>
+          <div v-if="row.flags.length" class="cell-flags">
+            <el-tag v-for="f in row.flags.slice(0, 2)" :key="f" type="danger" size="small" effect="light">
+              疑似·{{ f }}
+            </el-tag>
+            <span v-if="row.flags.length > 2" class="flags-more">+{{ row.flags.length - 2 }}</span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column prop="author" label="作者" width="130" />
@@ -532,7 +553,16 @@ onUnmounted(() => {
           <span>{{ fmtTime(detailItem.createdAt, true) }}</span>
         </div>
         <h3 class="detail-title">{{ detailItem.title }}</h3>
-        <p class="detail-content">{{ detailItem.content }}</p>
+        <p class="detail-content">
+          <template v-for="(seg, i) in highlightSegments(detailItem.content, detailItem.flags)" :key="i">
+            <mark v-if="seg.hit" class="hit-word">{{ seg.text }}</mark>
+            <template v-else>{{ seg.text }}</template>
+          </template>
+        </p>
+        <div v-if="detailItem.flags.length" class="detail-flags">
+          <span class="detail-flags-label">疑似违规：</span>
+          <el-tag v-for="f in detailItem.flags" :key="f" type="danger" size="small" effect="light">{{ f }}</el-tag>
+        </div>
         <div v-if="detailItem.imageUrls.length" class="detail-images">
           <el-image
             v-for="(u, i) in detailItem.imageUrls"
@@ -698,6 +728,19 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.cell-flags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.flags-more {
+  font-size: 12px;
+  color: #f56c6c;
+}
+
 .text-muted {
   color: #c0c4cc;
 }
@@ -750,6 +793,26 @@ onUnmounted(() => {
   line-height: 1.7;
   color: #303133;
   white-space: pre-wrap;
+}
+
+.hit-word {
+  background: #fef0f0;
+  color: #f56c6c;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.detail-flags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.detail-flags-label {
+  font-size: 13px;
+  color: #909399;
 }
 
 .detail-images {

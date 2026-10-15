@@ -55,7 +55,8 @@ test('基础接口：health / operators / meta / 未知 API 404', async () => {
   assert.ok(ops.body.some((o: { name: string }) => o.name === '林晚晴'));
 
   const meta = await jget('/api/meta');
-  assert.deepEqual(meta.body, { rejectReasons: ['广告营销', '内容低俗', '人身攻击', '敏感违规', '灌水无意义'] });
+  assert.deepEqual(meta.body.rejectReasons, ['广告营销', '内容低俗', '人身攻击', '敏感违规', '灌水无意义']);
+  assert.ok(Array.isArray(meta.body.sensitiveWords) && meta.body.sensitiveWords.length > 0, 'meta 应下发非空敏感词库');
 
   const missing = await jget('/api/nope');
   assert.equal(missing.status, 404);
@@ -237,4 +238,30 @@ test('新建投稿：校验、进入待审核队列、可被审核', async () =>
   const r = await jpost(`/api/submissions/${created.body.item.id}/review`, { action: 'approve', operator: '林晚晴' });
   assert.equal(r.status, 200);
   assert.equal(r.body.item.status, 'approved');
+});
+
+test('敏感词标记与审核时效统计', async () => {
+  // 含敏感词的投稿应带 flags；正常内容不应误报
+  const hit = await jget(`/api/submissions?status=all&q=${encodeURIComponent('日入')}`);
+  assert.equal(hit.status, 200);
+  assert.ok(hit.body.total >= 1, '种子数据应有含「日入」的投稿');
+  assert.ok(hit.body.items[0].flags.includes('日入'), '命中敏感词的条目应带 flags');
+  assert.ok(Array.isArray(hit.body.items[0].flags));
+
+  const clean = await jget(`/api/submissions?status=all&q=${encodeURIComponent('独库公路')}`);
+  assert.ok(clean.body.total >= 1);
+  assert.deepEqual(clean.body.items[0].flags, [], '正常内容不应误报敏感词');
+
+  // 新建投稿同样参与敏感词标记
+  const created = await jpost('/api/submissions', {
+    title: '加v进群领福利', content: '扫码进群，日结兼职', author: '测试用户',
+  });
+  assert.equal(created.status, 201);
+  assert.ok(created.body.item.flags.length >= 2, '新投稿应按内容标记敏感词');
+
+  // 时效统计：平均耗时为正数，超 24h 积压在 [1, 30) 区间
+  const { body: stats } = await jget('/api/stats');
+  const t = stats.reviewTimeliness;
+  assert.ok(typeof t.avgReviewMinutes === 'number' && t.avgReviewMinutes > 0, '平均审核耗时应为正数');
+  assert.ok(t.staleCount >= 1 && t.staleCount < 30, `超 24h 积压应落在 [1,30)，实际 ${t.staleCount}`);
 });

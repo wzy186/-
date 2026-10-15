@@ -23,6 +23,11 @@ async function load() {
 }
 
 const rateText = (r: number | null) => (r === null ? '—' : `${r}%`)
+const fmtMinutes = (m: number | null) => {
+  if (m === null) return '—'
+  if (m < 60) return `${m} 分钟`
+  return `${Math.round((m / 60) * 10) / 10} 小时`
+}
 
 const kpis = computed(() => {
   const s = stats.value
@@ -58,6 +63,22 @@ const kpis = computed(() => {
       tint: '#ecf5ff',
       value: s ? rateText(s.overall.approveRate) : '—',
       caption: s ? `累计处理 ${s.overall.processed} 条` : '',
+    },
+    {
+      label: '平均审核耗时',
+      icon: '⏱️',
+      color: '#909399',
+      tint: '#f4f4f5',
+      value: s ? fmtMinutes(s.reviewTimeliness.avgReviewMinutes) : '—',
+      caption: '投稿提交到审核的平均时长',
+    },
+    {
+      label: '超 24h 积压',
+      icon: '🚨',
+      color: '#f56c6c',
+      tint: '#fef0f0',
+      value: s ? String(s.reviewTimeliness.staleCount) : '—',
+      caption: '待审核超过 24 小时的投稿',
     },
   ]
 })
@@ -98,7 +119,7 @@ onMounted(() => void load())
 
     <!-- KPI -->
     <el-row :gutter="16" class="kpi-row">
-      <el-col v-for="k in kpis" :key="k.label" :xs="12" :sm="12" :md="6">
+      <el-col v-for="k in kpis" :key="k.label" :xs="12" :sm="12" :md="8">
         <div class="kpi-card">
           <div class="kpi-top">
             <span class="kpi-icon" :style="{ background: k.tint, color: k.color }">{{ k.icon }}</span>
