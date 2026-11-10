@@ -55,7 +55,13 @@
 | 截图 04 | AC-05 重启后重开已保存方案（只读视图，含载入模拟器/返回按钮） | `docs/screenshots/04-saved-plan-ac05.png` |
 | 截图 05 | 扩展功能：等权分散调仓建议与偏差报告（集中度解除） | `docs/screenshots/05-rebalance-equal.png` |
 
-生成方式：`bash scripts/screenshots.sh`（Chrome headless，`--virtual-time-budget=8000` 等待前端防抖与接口返回）。
+**实机复验截图**（候选人在本机浏览器手工操作截取，覆盖核心流程三页面）：
+
+| 截图 06 | 组合概览实机截图：统计卡 / 持仓明细 / 资产结构环形图 / 集中度检查两项触发 | `docs/screenshots/06-user-overview.png` |
+| 截图 07 | 调仓模拟实机截图：AC-03 两笔操作逐笔生效与前后对比 | `docs/screenshots/07-user-simulate-ac03.png` |
+| 截图 08 | 已存方案实机截图：AC-03 方案重开（只读视图，结果与保存时一致） | `docs/screenshots/08-user-plan-reopen.png` |
+
+自动截图生成方式：`bash scripts/screenshots.sh`（Chrome headless，`--virtual-time-budget=8000` 等待前端防抖与接口返回）。
 
 ## 5. 结论与已知问题
 
