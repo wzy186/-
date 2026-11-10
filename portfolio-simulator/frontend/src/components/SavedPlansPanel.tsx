@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Op, PlanDetail, PlanSummary } from "../types";
 import CompareTable from "./CompareTable";
+import { formatMoney } from "../utils/format";
 
 interface Props {
   plans: PlanSummary[];
@@ -68,10 +69,10 @@ export default function SavedPlansPanel({ plans, opened, openError, onOpen, onCl
                 </span>
                 <span className="op-nums">× {op.quantity}</span>
                 <span className="op-nums">
-                  {index < opened.applied.length ? `${opened.applied[index].amount} 元` : "—"}
+                  {index < opened.applied.length ? `${formatMoney(opened.applied[index].amount)} 元` : "—"}
                 </span>
                 <span className="op-nums">
-                  {index < opened.applied.length ? `现金 ${opened.applied[index].cash_after}` : "—"}
+                  {index < opened.applied.length ? `现金 ${formatMoney(opened.applied[index].cash_after)}` : "—"}
                 </span>
                 <span className="op-status-tag">已生效</span>
               </div>

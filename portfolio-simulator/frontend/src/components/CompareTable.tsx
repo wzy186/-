@@ -2,6 +2,7 @@
     全部数值来自后端，前端不做金额/占比计算。 */
 import type { Analysis, SimError } from "../types";
 import TriggerBadge from "./TriggerBadge";
+import { formatMoney, formatQty } from "../utils/format";
 
 interface Props {
   orig: Analysis;
@@ -52,14 +53,14 @@ export default function CompareTable({ orig, sim, simCash, appliedCount, error, 
         <tbody>
           <tr>
             <td className="align-left">现金（元）</td>
-            <td>{orig.cash}</td>
-            <td>{simCash ?? "—"}</td>
+            <td>{formatMoney(orig.cash)}</td>
+            <td>{formatMoney(simCash)}</td>
             <td>—</td>
           </tr>
           <tr>
             <td className="align-left">总资产（元）</td>
-            <td>{orig.total_assets}</td>
-            <td>{sim ? sim.total_assets : "—"}</td>
+            <td>{formatMoney(orig.total_assets)}</td>
+            <td>{sim ? formatMoney(sim.total_assets) : "—"}</td>
             <td>{sim && sim.total_assets === orig.total_assets ? <span className="delta">不变</span> : "—"}</td>
           </tr>
           {orig.items.map((item) => {
@@ -71,14 +72,14 @@ export default function CompareTable({ orig, sim, simCash, appliedCount, error, 
                   <span className="symbol">{item.symbol}</span>
                 </td>
                 <td>
-                  {item.quantity} 股 / {item.market_value} 元 / {item.weight_percent}%{" "}
+                  {formatQty(item.quantity)} 股 / {formatMoney(item.market_value)} 元 / {item.weight_percent}%{" "}
                   <TriggerBadge triggered={item.single_triggered} />
                 </td>
                 <td>
                   {simItem ? (
                     <>
-                      {simItem.quantity} 股 / {simItem.market_value} 元 / {simItem.weight_percent}%{" "}
-                      <TriggerBadge triggered={simItem.single_triggered} />
+                      {formatQty(simItem.quantity)} 股 / {formatMoney(simItem.market_value)} 元 /{" "}
+                      {simItem.weight_percent}% <TriggerBadge triggered={simItem.single_triggered} />
                     </>
                   ) : (
                     "—"

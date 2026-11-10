@@ -137,6 +137,44 @@ body {
   color: var(--ink);
 }
 
+.tab-badge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--seq-250);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  vertical-align: 1px;
+}
+
+/* ---------- 加载骨架屏 ---------- */
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    100deg,
+    var(--grid) 40%,
+    var(--surface) 50%,
+    var(--grid) 60%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -80% 0;
+  }
+}
+
 /* ---------- 卡片与分节 ---------- */
 
 .card {
@@ -384,12 +422,71 @@ td .industry-tag {
   border-radius: 8px;
 }
 
-/* ---------- 行业分布 ---------- */
+/* ---------- 行业分布 / 资产结构 ---------- */
+
+.structure-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 28px;
+  align-items: center;
+}
+
+@media (max-width: 860px) {
+  .structure-layout {
+    grid-template-columns: 1fr;
+  }
+  .donut-wrap {
+    margin: 0 auto;
+  }
+}
+
+.donut-wrap {
+  position: relative;
+  width: 150px;
+  height: 150px;
+}
+
+.donut {
+  width: 150px;
+  height: 150px;
+}
+
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+
+.donut-center-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.donut-center-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sr-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .industry-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .industry-row {

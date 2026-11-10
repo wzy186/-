@@ -1,6 +1,6 @@
 /** 应用主控：加载组合、编排三个页签与模拟/保存/重开流程。
 
-    URL 参数（验证辅助入口，便于复现验收场景与截图）：
+    URL 参数（验证辅助入口，便于复现验收场景与截图，解析逻辑见 urlParams.ts）：
     - ?tab=overview|simulate|plans  指定初始页签
     - ?ops=SELL:A01:100,BUY:A02:100 预填操作列表并进入模拟页
     - ?plan=3                       进入方案页并打开指定方案
@@ -16,8 +16,7 @@ import RebalancePanel from "./components/RebalancePanel";
 import SavedPlansPanel from "./components/SavedPlansPanel";
 import SimulationPanel from "./components/SimulationPanel";
 import type { Op, PlanDetail, PlanSummary, Portfolio, SimulateResponse } from "./types";
-
-type Tab = "overview" | "simulate" | "plans";
+import { initialTab, parseOpsParam, parsePlanParam, parseRebalanceParam, Tab } from "./urlParams";
 
 const TAB_LABELS: { key: Tab; label: string }[] = [
   { key: "overview", label: "组合概览" },
@@ -25,44 +24,13 @@ const TAB_LABELS: { key: Tab; label: string }[] = [
   { key: "plans", label: "已存方案" },
 ];
 
-function parseOpsParam(): Op[] {
-  const raw = new URLSearchParams(window.location.search).get("ops");
-  if (!raw) return [];
-  const ops: Op[] = [];
-  for (const part of raw.split(",")) {
-    const [action, symbol, quantity] = part.split(":");
-    if ((action === "BUY" || action === "SELL") && symbol && Number.isInteger(Number(quantity)) && Number(quantity) > 0) {
-      ops.push({ action, symbol, quantity: Number(quantity) });
-    }
-  }
-  return ops;
-}
-
-function parsePlanParam(): number | null {
-  const raw = new URLSearchParams(window.location.search).get("plan");
-  const id = Number(raw);
-  return raw && Number.isInteger(id) && id > 0 ? id : null;
-}
-
-function initialTab(ops: Op[], planId: number | null): Tab {
-  const param = new URLSearchParams(window.location.search).get("tab");
-  if (param === "overview" || param === "simulate" || param === "plans") return param;
-  if (ops.length > 0) return "simulate";
-  if (planId !== null) return "plans";
-  return "overview";
-}
-
-function parseRebalanceParam(): "equal" | null {
-  const raw = new URLSearchParams(window.location.search).get("rebalance");
-  return raw === "equal" ? "equal" : null;
-}
-
 export default function App() {
-  const initialOps = useRef(parseOpsParam()).current;
-  const initialPlan = useRef(parsePlanParam()).current;
-  const initialRebalance = useRef(parseRebalanceParam()).current;
+  const search = useRef(window.location.search).current;
+  const initialOps = useRef(parseOpsParam(search)).current;
+  const initialPlan = useRef(parsePlanParam(search)).current;
+  const initialRebalance = useRef(parseRebalanceParam(search)).current;
 
-  const [tab, setTab] = useState<Tab>(() => initialTab(initialOps, initialPlan));
+  const [tab, setTab] = useState<Tab>(() => initialTab(search, initialOps, initialPlan));
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -231,13 +199,29 @@ export default function App() {
         <div className="app-header">
           <h1>投资组合分析与调仓模拟</h1>
         </div>
-        <div className="empty-state">加载中…</div>
+        <div className="stat-tiles">
+          <div className="stat-tile hero"><div className="skeleton" style={{ height: 44 }} /></div>
+          <div className="stat-tile"><div className="skeleton" style={{ height: 44 }} /></div>
+          <div className="stat-tile"><div className="skeleton" style={{ height: 44 }} /></div>
+          <div className="stat-tile"><div className="skeleton" style={{ height: 44 }} /></div>
+        </div>
+        <div className="card"><div className="skeleton" style={{ height: 200 }} /></div>
       </div>
     );
   }
 
   const simAnalysis = simResult ? simResult.analysis : null;
   const simCash = simResult ? simResult.simulated.cash : null;
+  const alertCount =
+    portfolio.analysis.concentration.single_instrument.length +
+    portfolio.analysis.concentration.industry.length;
+
+  const tabBadge = (key: Tab): string | null => {
+    if (key === "overview" && alertCount > 0) return `⚠${alertCount}`;
+    if (key === "simulate" && ops.length > 0) return String(ops.length);
+    if (key === "plans" && plans.length > 0) return String(plans.length);
+    return null;
+  };
 
   return (
     <div className="app">
@@ -249,12 +233,16 @@ export default function App() {
         <span className="snapshot-chip">
           行情快照 {portfolio.snapshot_at} · {portfolio.currency}
         </span>
+        <span className={`badge ${alertCount > 0 ? "badge-alert" : "badge-ok"}`}>
+          {alertCount > 0 ? `⚠ ${alertCount} 项超限` : "✓ 无超限"}
+        </span>
       </div>
 
       <div className="tabs">
         {TAB_LABELS.map(({ key, label }) => (
           <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
             {label}
+            {tabBadge(key) && <span className="tab-badge">{tabBadge(key)}</span>}
           </button>
         ))}
       </div>
@@ -262,13 +250,7 @@ export default function App() {
       {tab === "overview" && (
         <div>
           <Overview portfolio={portfolio} />
-          <ConcentrationPanel
-            analysis={portfolio.analysis}
-            thresholds={{
-              single: portfolio.rules.single_instrument_threshold,
-              industry: portfolio.rules.industry_threshold,
-            }}
-          />
+          <ConcentrationPanel analysis={portfolio.analysis} rules={portfolio.rules} />
         </div>
       )}
 

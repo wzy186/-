@@ -1,30 +1,52 @@
-/** 组合概览（FR-01）：总资产/现金/持仓市值/持仓数量统计卡、持仓明细表、行业分布。 */
+/** 组合概览（FR-01）：总资产/现金/持仓市值/持仓数量统计卡、持仓明细表、
+    资产结构（环形图 + 行业分布条形图）。全部数值来自后端，前端仅做展示格式化。 */
 import type { Portfolio } from "../types";
+import Donut from "./Donut";
 import TriggerBadge from "./TriggerBadge";
 import WeightBar from "./WeightBar";
 import { industryColor } from "./industryColors";
+import { formatMoney, formatQty } from "../utils/format";
 
 export default function Overview({ portfolio }: { portfolio: Portfolio }) {
   const { analysis, instruments, rules } = portfolio;
 
   const industries = [...new Set(analysis.items.map((item) => item.industry))];
 
+  const donutSegments = [
+    ...industries.map((industry) => {
+      const item = analysis.items.find((i) => i.industry === industry)!;
+      const triggered = analysis.concentration.industry.some((c) => c.industry === industry);
+      return {
+        label: industry,
+        percent: Number(item.industry_weight_percent),
+        color: industryColor(industry),
+        triggered,
+      };
+    }),
+    {
+      label: "现金",
+      percent: Number(analysis.cash_weight) * 100,
+      color: "var(--cat-other)",
+      triggered: false,
+    },
+  ];
+
   return (
     <div>
       <div className="stat-tiles">
         <div className="stat-tile hero">
           <div className="label">总资产（元）</div>
-          <div className="value">{analysis.total_assets}</div>
+          <div className="value">{formatMoney(analysis.total_assets)}</div>
           <div className="note">行情快照 {portfolio.snapshot_id}</div>
         </div>
         <div className="stat-tile">
           <div className="label">现金（元）</div>
-          <div className="value">{analysis.cash}</div>
-          <div className="note">占总资产 {Number(analysis.cash_weight) * 100}%</div>
+          <div className="value">{formatMoney(analysis.cash)}</div>
+          <div className="note">占总资产 {(Number(analysis.cash_weight) * 100).toFixed(2)}%</div>
         </div>
         <div className="stat-tile">
           <div className="label">持仓市值（元）</div>
-          <div className="value">{analysis.instruments_value}</div>
+          <div className="value">{formatMoney(analysis.instruments_value)}</div>
           <div className="note">币种 {portfolio.currency}</div>
         </div>
         <div className="stat-tile">
@@ -55,9 +77,9 @@ export default function Overview({ portfolio }: { portfolio: Portfolio }) {
                   <span className="symbol">{item.symbol}</span>
                   <div className="industry-tag">{item.industry}</div>
                 </td>
-                <td>{(instruments.find((i) => i.symbol === item.symbol)?.price ?? "—")}</td>
-                <td>{item.quantity}</td>
-                <td>{item.market_value}</td>
+                <td>{formatMoney(instruments.find((i) => i.symbol === item.symbol)?.price)}</td>
+                <td>{formatQty(item.quantity)}</td>
+                <td>{formatMoney(item.market_value)}</td>
                 <td>
                   <WeightBar
                     percent={item.weight_percent}
@@ -75,28 +97,43 @@ export default function Overview({ portfolio }: { portfolio: Portfolio }) {
       </div>
 
       <div className="card">
-        <h2>行业分布</h2>
-        <div className="industry-list">
-          {industries.map((industry) => {
-            const item = analysis.items.find((i) => i.industry === industry)!;
-            const conc = analysis.concentration.industry.find((c) => c.industry === industry);
-            const triggered = Boolean(conc);
-            return (
-              <div className="industry-row" key={industry}>
-                <div className="industry-name">{industry}</div>
-                <WeightBar
-                  percent={item.industry_weight_percent}
-                  threshold={rules.industry_threshold}
-                  triggered={triggered}
-                  fillColor={industryColor(industry)}
-                />
-                <div className="industry-value">
-                  {item.industry_weight_percent}%
-                  {triggered && <span className="delta minus">⚠ 超限</span>}
+        <h2>资产结构</h2>
+        <div className="structure-layout">
+          <Donut
+            segments={donutSegments}
+            centerLabel="总资产（元）"
+            centerValue={analysis.total_assets}
+          />
+          <div className="industry-list">
+            {industries.map((industry) => {
+              const item = analysis.items.find((i) => i.industry === industry)!;
+              const triggered = analysis.concentration.industry.some((c) => c.industry === industry);
+              return (
+                <div className="industry-row" key={industry}>
+                  <div className="industry-name">{industry}</div>
+                  <WeightBar
+                    percent={item.industry_weight_percent}
+                    threshold={rules.industry_threshold}
+                    triggered={triggered}
+                    fillColor={industryColor(industry)}
+                  />
+                  <div className="industry-value">
+                    {item.industry_weight_percent}%
+                    {triggered && <span className="delta minus">⚠ 超限</span>}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+            <div className="industry-row">
+              <div className="industry-name">现金</div>
+              <WeightBar
+                percent={(Number(analysis.cash_weight) * 100).toFixed(2)}
+                triggered={false}
+                fillColor="var(--cat-other)"
+              />
+              <div className="industry-value">{(Number(analysis.cash_weight) * 100).toFixed(2)}%</div>
+            </div>
+          </div>
         </div>
         <div className="hint">
           行业占比 = 同行业标的市值之和 ÷ 总资产；现金计入总资产分母，不归入任何行业。

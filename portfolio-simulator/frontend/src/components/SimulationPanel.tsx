@@ -1,6 +1,7 @@
 /** 调仓模拟（FR-03）：按顺序添加多笔买卖操作，逐笔展示执行结果与错误。 */
 import { useState } from "react";
 import type { AppliedOp, Instrument, Op, SimError } from "../types";
+import { formatMoney } from "../utils/format";
 
 export type OpStatus = "applied" | "error" | "skipped" | "pending";
 
@@ -115,8 +116,8 @@ export default function SimulationPanel(props: Props) {
                   {op.symbol} {instruments.find((i) => i.symbol === op.symbol)?.name ?? ""}
                 </span>
                 <span className="op-nums">× {op.quantity}</span>
-                <span className="op-nums">{detail ? `${detail.amount} 元` : "—"}</span>
-                <span className="op-nums">{detail ? `现金 ${detail.cash_after}` : "—"}</span>
+                <span className="op-nums">{detail ? `${formatMoney(detail.amount)} 元` : "—"}</span>
+                <span className="op-nums">{detail ? `现金 ${formatMoney(detail.cash_after)}` : "—"}</span>
                 <span className="op-controls">
                   {status === "skipped" ? (
                     <span className="op-status-tag">未执行</span>
