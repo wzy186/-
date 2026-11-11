@@ -1,6 +1,6 @@
 
 
-## 🛠 技术栈
+## 技术栈
 
 | 方向 | 技术 |
 |------|------|
@@ -11,9 +11,9 @@
 | 前端 | Vue 3 · TypeScript · Vite · Element Plus |
 | 其他 | Docker · Linux · Git |
 
-## 📁 项目
+## 项目
 
-### 🤖 AI / 大模型
+### AI / 大模型
 
 | 项目 | 简介 | 亮点 |
 |------|------|------|
@@ -24,7 +24,7 @@
 | [cat2](./cat2) | 昇腾 CANN 自定义算子：SiLU 反向 | host 端 Tiling + AscendC kernel 实现（op_host / op_kernel） |
 | [transformer](./transformer) | Transformer 从零实现（"Attention Is All You Need"） | 完整训练管线 + 消融实验，可复现 |
 
-### ⚙️ 后端 / 分布式 / 全栈
+### 后端 / 分布式 / 全栈
 
 | 项目 | 简介 | 亮点 |
 |------|------|------|
